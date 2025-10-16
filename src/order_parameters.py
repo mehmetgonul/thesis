@@ -1,0 +1,456 @@
+import math
+import numpy as np
+from torch import nn
+from itertools import product, combinations_with_replacement
+from src.autoencoder import AutoEncoder
+from src.data_managers import *
+from src.integrals.integrals import Integral
+from src.plot import *
+
+def compute_order_parameters_from_weights(model: AutoEncoder, omega):
+    W = model.encoder.weight.data.detach().cpu().numpy()
+    if model.tied: 
+        V = model.encoder.weight.detach().cpu().numpy()
+    else:
+        V = model.decoder.weight.detach().cpu().numpy().T
+    
+    D, _ = omega.shape
+
+    T1 = V @ omega @ V.T/(D**2)
+    Q1 = W @ omega @ W.T/D
+    R1 = V @ omega @ W.T/(D**1.5)
+    
+    T0 = V@V.T/D
+    Q0 = W@W.T/D
+    R0 = W@V.T/D
+    
+    return T1, Q1, R1, T0, Q0, R0
+
+
+def calculate_densities_from_weights(model: AutoEncoder, omega, psis, rhos):
+    W = model.encoder.weight.data.detach().numpy()
+    if model.tied: 
+        V = model.encoder.weight.detach().cpu().numpy()
+    else:
+        V = model.decoder.weight.detach().cpu().numpy().T
+    
+    D, _ = omega.shape
+    
+    W_tau = W @ psis / math.sqrt(D) # K x D
+    K = W_tau.shape[0]
+    
+    V_tau = V @ psis / math.sqrt(D) # K x D
+    
+    q, r, t = np.zeros((K,K,D)), np.zeros((K,K,D)), np.zeros((K,K,D))
+    for k in range(K):
+        for l in range(K):
+            q[k,l] = W_tau[k] * W_tau[l]
+            r[k,l] = V_tau[k] * W_tau[l] / math.sqrt(D)
+            t[k,l] = V_tau[k] * V_tau[l] / D
+    
+    return q,r,t
+    
+    
+def test_error_with_order_parameters(T0, T1, Q1, R1, omega, integral: Integral):
+    ## taken from NonLinearShallowAE
+    
+    D, _ = omega.shape
+    K, _ = Q1.shape
+    
+    C2Vec = np.zeros((K,2, 2))
+    C2Mat = np.zeros((K, K, 2, 2))
+    
+    for k in range(K):
+        C2Vec[k, 0, 0] = T1[k, k]
+        C2Vec[k, 0, 1] = R1[k, k]
+        C2Vec[k, 1, 0] = R1[k, k]
+        C2Vec[k, 1, 1] = Q1[k, k]
+        
+        for l in range(K):
+            C2Mat[k, l, 0, 0] = Q1[k, k]
+            C2Mat[k, l, 0, 1] = Q1[k, l]
+            C2Mat[k, l, 1, 0] = Q1[k, l]
+            C2Mat[k, l, 1, 1] = Q1[l, l]
+
+
+    J2m = sum([integral.J2(C2Vec[k]) for k in range(K)])
+    I2m = np.asarray([integral.I2(C2Mat[k,l])* T0[k,l] for k, l in product(range(K),range(K))])
+    
+    error  = 0.5*np.trace(omega)/D
+    error += 0.5*np.sum(I2m)
+    error -= np.sum(J2m)
+    return error , (0.5*np.trace(omega)/D, np.sum(J2m), 0.5*np.sum(I2m) )
+
+    
+def change_in_T(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
+    
+    
+    def _computation(k, l):
+        
+        K, _ = T1.shape
+        
+        C2 = np.zeros((2, 2))
+        C2[0,0] , C2[0,1] , C2[1,1] = Q1[k,k], Q1[k,k], Q1[k,k]
+        
+        dd = integrals.J2(C2) / Q1[k, k] * rhos * r[l, k]
+        
+        C2vec = np.zeros((K,2,2))
+        for a in range(K):
+            C2vec[a,0,0] , C2vec[a,0,1] , C2vec[a,1,1] = Q1[k,k], Q1[k,a], Q1[a,a]
+        dd -= sum([integrals.I2(C2vec[a]) * t[a,l] * D for a in range(K)])
+        
+        return dd
+    
+    dkl = []
+    dlk = []
+    
+    for k, l in combinations_with_replacement(range(K), 2):
+        dkl.append(_computation(k, l))
+        dlk.append(_computation(l, k))
+        
+    indicies = np.triu_indices_from(T0)
+    
+    dkl = lr * np.concatenate(dkl).reshape(len(indicies[0]), t.shape[-1])
+    dlk = lr * np.concatenate(dlk).reshape(len(indicies[0]), t.shape[-1])
+    
+    dt = np.zeros(t.shape)
+    dt[indicies] = dkl + dlk
+    
+    for k in range(K):
+        for l in range(k):
+            dt[k,l] = dt[l, k]
+            
+    return dt / D
+    
+
+def change_in_T0(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
+    
+    def _computation(k, l):
+        dd = 0
+        K, _ = T1.shape
+        
+        C2 = np.zeros((2,2))
+        C2[0,0] , C2[0,1] , C2[1,1] = Q1[k,k], Q1[k,k], Q1[k,k] #T1[l,l], R1[l,k], Q1[k,k]
+        dd = integrals.J2(C2) / Q1[k,k] * R1[l,k]
+        
+        C2vec = np.zeros((K,2,2))
+        for a in range(K):
+            C2vec[a,0,0] , C2vec[a,0,1] , C2vec[a,1,1] = Q1[k,k], Q1[k,a], Q1[a,a]
+        dd -= sum([integrals.I2(C2vec[a]) * T0[a,l] for a in range(K)])
+        return dd
+    
+    indicies = np.triu_indices(K)
+    
+    dkl = [ _computation(k, l) for k, l in zip(*indicies)]
+    dlk = [ _computation(l, k) for k, l in zip(*indicies)]
+    
+    dkl = lr * np.asarray(dkl)
+    dlk = lr * np.asarray(dlk)
+
+    dT0 = np.zeros_like(T0)
+    dT0[indicies] = dkl + dlk
+    for k in range(K):
+        for l in range(k):
+            dT0[k, l] = dT0[l, k]
+
+    return dT0
+    
+    
+def change_in_Q1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
+    
+    def _computation(k, l):
+        C2 = np.zeros((2, 2))
+        C2[0, 0] = Q1[k, k]
+        C2[0, 1] = R1[k, k]
+        C2[1, 1] = T1[k, k]
+
+        det = Q1[k, k] * T1[k, k] - (R1[k, k] ** 2)
+        C = integrals.I21(C2) * (T1[k, k] * q[k, l] - R1[k, k] * r[k, l])
+        C += integrals.I22(C2) * (Q1[k, k] * r[k, l] - R1[k, k] * q[k, l])
+        C /= det
+        
+        A = 0
+        for a in range(K):
+            if a == k:
+                continue
+            det_ka = Q1[k, k] * Q1[a, a] - (Q1[k, a] ** 2)
+
+            C3 = np.zeros((3, 3))
+
+            C3[0, 0] = Q1[k, k]; C3[0, 1] = Q1[k, k]
+            C3[1, 0] = Q1[k, k]; C3[1, 1] = Q1[k, k]
+            C3[0, 2] = Q1[k, a]; C3[2, 0] = Q1[k, a]
+            C3[1, 2] = Q1[k, a]; C3[2, 1] = Q1[k, a]
+            C3[2, 2] = Q1[a, a]
+            Aa = integrals.I3(C3) * (Q1[a, a] * q[k, l] - Q1[k, a] * q[a, l])
+
+            C3[0, 1] = Q1[k, a]; C3[1, 0] = Q1[k, a]
+            C3[1, 1] = Q1[a, a]; C3[1, 2] = Q1[a, a]; C3[2, 1] = Q1[a, a]
+            Aa += integrals.I3(C3) * (Q1[k, k] * q[a, l] - Q1[k, a] * q[k, l])
+
+            Aa *= T0[k, a] / det_ka
+            A -= Aa
+
+        # ----- B term -----
+        C3 = np.ones((3, 3)) * Q1[k, k]
+        B = - T0[k, k] / Q1[k, k] * integrals.I3(C3) * q[k, l]
+
+        return (A + B + C) * rhos
+
+    indicies = np.triu_indices(K)
+    dkl = [ _computation(k, l) for k, l in zip(*indicies) ]
+    dlk = [ _computation(l, k) for k, l in zip(*indicies) ]
+
+    dkl = lr * np.concatenate(dkl).reshape(len(indicies[0]), q.shape[-1])
+    dlk = lr * np.concatenate(dlk).reshape(len(indicies[0]), q.shape[-1])
+
+    dq = np.zeros_like(q)
+    dq[indicies] = dkl + dlk
+    for k in range(K):
+        for l in range(k):
+            dq[k, l] = dq[l, k]
+
+    return dq / D
+    
+
+def change_in_R1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
+    
+    def _computation_dv(k, l):
+        C2 = np.zeros((2, 2))
+        C2[0, 0] = Q1[k, k]
+        C2[0, 1] = Q1[k, k]
+        C2[1, 0] = Q1[k, k]
+        C2[1, 1] = Q1[k, k]
+
+        dd = integrals.J2(C2) / Q1[k, k] * q[k, l] * rhos / D
+
+        C2 = np.zeros((2, 2))
+        for a in range(K):
+            C2[0, 0] = Q1[k, k]
+            C2[0, 1] = Q1[k, a]
+            C2[1, 0] = Q1[k, a]
+            C2[1, 1] = Q1[a, a]
+            dd -= integrals.I2(C2) * r[a, l]
+        return dd
+
+    
+    def _computation_dw(k, l):
+        C2 = np.zeros((2, 2))
+        C2[0, 0] = Q1[l, l]
+        C2[0, 1] = R1[l, l]
+        C2[1, 0] = R1[l, l]
+        C2[1, 1] = T1[l, l]
+
+        det = Q1[l, l] * T1[l, l] - (R1[l, l] ** 2)
+        C = integrals.I21(C2) * (T1[l, l] * r[k, l] - R1[l, l] * t[k, l])
+        C += integrals.I22(C2) * (Q1[l, l] * t[k, l] - R1[l, l] * r[k, l])
+        C /= det
+
+        # ----- A term -----
+        A = 0
+        for a in range(K):
+            if a == l:
+                continue
+            det_la = Q1[l, l] * Q1[a, a] - (Q1[l, a] ** 2)
+
+            C3 = np.zeros((3, 3))
+            # first config
+            C3[0, 0] = Q1[l, l]; C3[0, 1] = Q1[l, l]
+            C3[1, 0] = Q1[l, l]; C3[1, 1] = Q1[l, l]
+            C3[0, 2] = Q1[l, a]; C3[2, 0] = Q1[l, a]
+            C3[1, 2] = Q1[l, a]; C3[2, 1] = Q1[l, a]
+            C3[2, 2] = Q1[a, a]
+            Aa = integrals.I3(C3) * (Q1[a, a] * r[k, l] - Q1[l, a] * r[k, a])
+
+            # second config
+            C3[0, 1] = Q1[l, a]; C3[1, 0] = Q1[l, a]
+            C3[1, 1] = Q1[a, a]; C3[1, 2] = Q1[a, a]; C3[2, 1] = Q1[a, a]
+            Aa += integrals.I3(C3) * (Q1[l, l] * r[k, a] - Q1[l, a] * r[k, l])
+
+            Aa *= T0[l, a] / det_la
+            A -= Aa
+
+        # ----- B term -----
+        C3 = np.ones((3, 3)) * Q1[l, l]
+        B = - T0[l, l] / Q1[l, l] * integrals.I3(C3) * r[k, l]
+
+        return (A + B + C) * rhos / D
+
+    res_w = np.zeros_like(r)
+    res_v = np.zeros_like(r)
+    for k, l in product(range(K), range(K)):
+        res_v[k, l] = _computation_dv(k, l)
+        res_w[k, l] = _computation_dw(k, l)
+
+    dr = lr * (res_w + res_v)
+    return dr
+
+    
+def change_in_TBulk(q, r, t, rhos, T0, Q1, R1, T1, T1_bulk, lr, K, D, integrals: Integral):
+    
+    def _computation(k, l):
+        C2vec = np.zeros((K, 2, 2))
+        for a in range(K):
+            C2vec[a, 0, 0] = Q1[k, k]
+            C2vec[a, 0, 1] = Q1[k, a]
+            C2vec[a, 1, 1] = Q1[a, a]
+        dd = 0.0
+        for a in range(K):
+            dd -= integrals.I2(C2vec[a]) * T1_bulk[a, l]
+        return dd
+    
+    indices = np.triu_indices(K)
+    dkl = [ _computation(k, l) for k, l in zip(*indices) ]
+    dlk = [ _computation(l, k) for k, l in zip(*indices) ]
+
+    dkl = lr * np.asarray(dkl)
+    dlk = lr * np.asarray(dlk)
+
+    dT = np.zeros_like(T1_bulk)
+    dT[indices] = dkl + dlk
+    for k in range(K):
+        for l in range(k):
+            dT[k, l] = dT[l, k]
+    return dT
+
+
+def change_in_RBulk(q, r, t, rhos, T0, Q1, R1, T1, R1_bulk, lr, K, D, integrals: Integral):
+    
+    def _computation(k, l):
+        C2vec = np.zeros((K, 2, 2))
+        for a in range(K):
+            C2vec[a, 0, 0] = Q1[k, k]
+            C2vec[a, 0, 1] = Q1[k, a]
+            C2vec[a, 1, 1] = Q1[a, a]
+        dd = 0.0
+        for a in range(K):
+            dd -= integrals.I2(C2vec[a]) * R1_bulk[a, l]
+        return dd
+
+    dR = np.zeros_like(R1_bulk)
+    for k, l in product(range(K), range(K)):
+        dR[k, l] = lr * _computation(k, l)
+        
+    return dR
+
+
+def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals):
+    
+    # load the model
+    model = AutoEncoder(
+        input_size=D,
+        hidden_size=K,
+        layers=1,
+        g=g,
+        tied=False,
+        scale=False,
+        bias=True
+    )
+
+    # setup the data manager
+    data_manager = DataManager(dataset=dataset, rank=1, D=D, noise=noise, gaussian=gaussian)
+
+    trainloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_trainloader()
+    testloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_testloader()
+
+    psis = eigenvectors * np.sqrt(D)
+    rhos = eigenvalues
+    
+    step = 0
+    dstep = 1.0/D
+    
+    # training the analytical integrals (if activation function has any)
+    T1, Q1, R1, T0, Q0, R0 = compute_order_parameters_from_weights(model=model, omega=omega)
+
+    Spikes = rhos[-low_rank:]
+    Bulk = rhos[:-low_rank]
+
+    Q1bulk = np.zeros(Q1.shape)
+    R1bulk = np.zeros(R1.shape)
+    T1bulk = np.zeros(T1.shape)
+
+    q, r, t = calculate_densities_from_weights(model, omega, psis, rhos)
+    for k, l in product(range(K), range(K)):
+        Q1bulk[k,l] = np.sum(Bulk*q[k,l,:-low_rank])
+        R1bulk[k,l] = np.sum(Bulk*r[k,l,:-low_rank])
+        T1bulk[k,l] = np.sum(Bulk*t[k,l,:-low_rank])
+
+    q_analytical, r_analytical, t_analytical = (q.T[-low_rank:]).T, (r.T[-low_rank:]).T , (t.T[-low_rank:]).T
+    Q1Bulk_analytical, R1Bulk_analytical, T1Bulk_analytical = Q1bulk, R1bulk, T1bulk
+    T0_analytical = T0
+
+
+    analytical_solutions_results = {
+        "T": [],
+        "T0": [],
+        "Q1": [],
+        "R1": [],
+        "loss": []
+    }
+
+    Q1_analytical = np.zeros((K, K))
+    R1_analytical = np.zeros((K, K))
+    T1_analytical = np.zeros((K, K))
+    
+    max_step = 1000
+    
+    try:
+        while step < max_step:
+                
+            # evolving the spike
+            for k, l in product(range(K), range(K)):
+                Q1_analytical[k,l] = np.sum(Spikes*q_analytical[k,l]) / D
+                R1_analytical[k,l] = np.sum(Spikes*r_analytical[k,l]) / D
+                T1_analytical[k,l] = np.sum(Spikes*t_analytical[k,l]) / D
+                
+                # low_rank == D means a real data set is being used
+                # in a real dataset everything is treated as a spike
+                if low_rank == D:
+                    Q1_analytical[k,l] += Q1Bulk_analytical[k,l]
+                    R1_analytical[k,l] += R1Bulk_analytical[k,l]
+                    T1_analytical[k,l] += T1Bulk_analytical[k,l]
+            
+            # NOTE: in the prior work at each step new order parameters are computed.
+            # NOTE: as a change, we evolve them independently
+            dt = change_in_T(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+            dq = change_in_Q1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+            dr = change_in_R1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+            dt0 = change_in_T0(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+
+            if low_rank != D: 
+                # since in the synthetic dataset there are bulks, we also have to evolve them
+                dR1Bulk_analytical = change_in_RBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, R1Bulk_analytical, lr, K, D, integrals)
+                dT1Bulk_analytical = change_in_TBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, T1Bulk_analytical, lr, K, D, integrals)
+                    
+            
+            # TODO: change the ode solving method 
+            t_analytical += dt * dstep
+            q_analytical += dq * dstep
+            r_analytical += dr * dstep
+            T0_analytical += dt0 * dstep
+
+            step += dstep
+
+            if low_rank != D:
+                R1Bulk_analytical += dR1Bulk_analytical * dstep
+                T1Bulk_analytical += dT1Bulk_analytical * dstep
+                
+            # compute analytical test loss
+            loss, _ = test_error_with_order_parameters(T0_analytical, T1_analytical, Q1_analytical, R1_analytical, omega, integrals)
+            
+            analytical_solutions_results["T0"].append(T0_analytical)
+            analytical_solutions_results["T"].append(T1_analytical)
+            analytical_solutions_results["Q1"].append(q_analytical)
+            analytical_solutions_results["R1"].append(r_analytical)
+            analytical_solutions_results["loss"].append(loss)
+            
+    except Exception as e:
+        pass
+
+    # plot analytical results
+    plot_graph(
+        values=analytical_solutions_results["loss"],
+        x_title="Step",
+        y_title="Loss",
+        plot_title="Analytical Loss through steps"
+    )
