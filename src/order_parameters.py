@@ -4,6 +4,7 @@ from torch import nn
 from itertools import product, combinations_with_replacement
 from src.autoencoder import AutoEncoder
 from src.data_managers import *
+from src.config import ExperimentConfig
 from src.integrals.integrals import Integral
 from src.plot import *
 
@@ -28,7 +29,7 @@ def compute_order_parameters_from_weights(model: AutoEncoder, omega):
 
 
 def calculate_densities_from_weights(model: AutoEncoder, omega, psis, rhos):
-    W = model.encoder.weight.data.detach().numpy()
+    W = model.encoder.weight.data.detach().cpu().numpy()
     if model.tied: 
         V = model.encoder.weight.detach().cpu().numpy()
     else:
@@ -334,14 +335,14 @@ def change_in_RBulk(q, r, t, rhos, T0, Q1, R1, T1, R1_bulk, lr, K, D, integrals:
     return dR
 
 
-def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals):
+def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config: ExperimentConfig):
     
     # load the model
     model = AutoEncoder(
         input_size=D,
         hidden_size=K,
         layers=1,
-        g=g,
+        g=g.torch_fn,
         tied=False,
         scale=False,
         bias=True
@@ -392,7 +393,7 @@ def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals):
     R1_analytical = np.zeros((K, K))
     T1_analytical = np.zeros((K, K))
     
-    max_step = 1000
+    max_step = 125
     
     try:
         while step < max_step:
@@ -450,7 +451,8 @@ def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals):
     # plot analytical results
     plot_graph(
         values=analytical_solutions_results["loss"],
-        x_title="Step",
-        y_title="Loss",
-        plot_title="Analytical Loss through steps"
+        x_title=f"{config.x_label}",
+        y_title=f"{config.y_label}",
+        plot_title=f"{config.plot_name}",
+        D=D
     )

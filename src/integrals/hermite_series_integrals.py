@@ -5,11 +5,6 @@ from scipy.special import hermitenorm, factorial, factorial2, erf
 
 from numpy.polynomial.hermite_e import HermiteE, hermegauss
 
-def hermite_expansion(act: ActivationFunction, N=10):
-    coeffs = act.calc_coefficients(N, normalized=True)
-
-    return HermiteE([coeffs[n]/np.sqrt(factorial(n)) for n in range(N)])
-
 class HermiteWrapper():
     def __init__(self, g: ActivationFunction):
         self.g: ActivationFunction = g
@@ -62,9 +57,9 @@ class HermiteSeries(Integral):
         
         K = max(N, 1)
         
-        g2_coeffs = g.calc_coefficients(K, normalized=True)
+        g2_coeffs = g.calc_coefficients(K, normalized=False)
         
-        return std1 * rho * g2_coeffs[1]
+        return rho * g2_coeffs[1]
 
     @staticmethod
     def I21(C, g: ActivationFunction, N=10) -> float:
@@ -78,12 +73,12 @@ class HermiteSeries(Integral):
         
         K = max(N, 3)
         
-        g_coeffs = g.calc_coefficients(K, normalized=True)
+        g_coeffs = g.calc_coefficients(K, normalized=False)
         
         h1 = g_coeffs[1]
         h3 = g_coeffs[3]
         
-        return float(std2 * rho * (h1 + h3))
+        return float(rho * (h1 + h3))
     
     @staticmethod
     def I22(C, g: ActivationFunction, N=10) -> float:
@@ -96,12 +91,12 @@ class HermiteSeries(Integral):
         
         K = max(N, 3)
         
-        g_coeffs = g.calc_coefficients(K, normalized=True)
+        g_coeffs = g.calc_coefficients(K, normalized=False)
         
         h1 = g_coeffs[1]
         h3 = g_coeffs[3]
         
-        return float((std2**2 / std1) * (h1 + (rho**2) * h3))
+        return float((h1 + (rho**2) * h3))
     
     @staticmethod
     def I3(C, g1: ActivationFunction, g3: ActivationFunction, N=10) -> float:

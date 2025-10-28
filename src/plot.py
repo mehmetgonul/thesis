@@ -2,12 +2,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def plot_graph(values: list[float], x_title: str, y_title: str, plot_title: str):
+def plot_graph(values: list[float], x_title: str, y_title: str, plot_title: str, D: int):
 
     print(f"len: {len(values)}")
 
     # the x axis is the steps, which are the indices of the values lis
-    x_axis = (np.arange(1, len(values)+1) / 1024) * 1
+    x_axis = (np.arange(1, len(values)+1) / D) * 1
     
     plt.figure()
     plt.plot(x_axis, values)

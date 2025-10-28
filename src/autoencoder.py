@@ -6,6 +6,7 @@ import torch.nn.functional as F
 
 import numpy as np
 
+# TODO: ask about aligned initialization
 
 class AutoEncoder(nn.Module):
     def __init__(self, input_size,  hidden_size, layers = 1, g = F.relu, tied = False, scale = True, bias = False, std = 0.1):

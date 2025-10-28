@@ -22,8 +22,8 @@ class DataManager:
         # TODO: implement a check for interpolation (usually shouldn't even be necessary)
         # xs = torch.nn.functional.interpolate(xs.unsqueeze(0), size=self.D).squeeze()
         
-        xs /= xs.std()*2
         xs -= xs.mean()
+        xs /= xs.std()*2
         
         dataset = torch.utils.data.TensorDataset(xs, ys)
     
@@ -45,7 +45,6 @@ class DataManager:
                             transform=input_transforms)
         
         elif self.dataset == "random":
-            # TODO: Ask abou this
             
             eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
     
@@ -141,6 +140,6 @@ class DataManager:
         xs , _  = next(iter(loader))
         omega = (xs.t()@xs/xs.shape[0]).cpu().numpy()
         eigenvalues, eigenvectors = np.linalg.eigh(omega)
-        # eigenvalues += np.abs(np.min(eigenvalues)) # for numerical stability
+        eigenvalues = np.maximum(eigenvalues, 0.0)
         sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
         return omega, sqrt_omega, eigenvalues, eigenvectors
