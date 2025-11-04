@@ -17,7 +17,7 @@ runs:
     line_type: "solid"
     line_color: "green"
     D: 1024
-    K: 6
+    K: 2
 
 plot_name: "ERF on CIFAR-10 (K=4)"
 x_label: "α"

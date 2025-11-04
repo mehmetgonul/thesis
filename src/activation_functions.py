@@ -9,7 +9,11 @@ import matplotlib.pyplot as plt
 
 from scipy.special import hermitenorm, factorial, factorial2, erf
 from numpy.polynomial.hermite_e import HermiteE, hermegauss
+import functools
 
+@functools.cache
+def factorial2_custom(n: int):
+    return factorial2(n) if n > 1 else 1
 
 # TODO: either use self.stretch or self.s
 
@@ -97,22 +101,22 @@ class Erf(ActivationFunction):
     
     def derivative_numpy_fn(self, x):
         return self.stretch*np.exp(-0.5*(x*self.stretch)**2)*np.sqrt(2/np.pi)
-    
-    def calc_coefficients(self, N=10, normalized=True, no_samples=25):
-        
+
+    def calc_coefficients(self, N=10, no_samples=25):
+      
         a = self.stretch
         
-        for n in range(len(self.coeffs), N+1):
-            if n % 2 == 0:
-                c_n = 0
-                
-            else:
-                c_n = np.sqrt(2/np.pi) * (-1)**((n-1)/2) * factorial2(n-2) * (a/np.sqrt(1+a*a))**n
-                
-            self.coeffs.append(c_n)
-            self.coeffs_normalized.append(c_n / (np.sqrt(factorial(n))))
+        coeffs = []
 
-        return self.coeffs if not normalized else self.coeffs_normalized 
+        for n in range(0, N + 1):
+            if n % 2 == 0:
+                c_n = 0.0                           
+            else:
+                c_n = np.sqrt(2/np.pi) * ((-1)**((n-1)//2)) * factorial2_custom(n-2) * (a/np.sqrt(1.0 + a*a))**n
+                
+            coeffs.append(c_n)
+
+        return np.array(coeffs)
     
     
     def scale(self, s: float):
@@ -150,7 +154,7 @@ class ReLU(ActivationFunction):
                 c_n = 0.5
                 
             elif n % 2 == 0:
-                c_n = (-1)**(0.5*(n-2)) * factorial2(n-3) / np.sqrt(2*np.pi)
+                c_n = (-1)**(0.5*(n-2)) * factorial2_custom(n-3) / np.sqrt(2*np.pi)
                 
             else:
                 c_n = 0 # no coefficients for odd n
@@ -249,7 +253,7 @@ class GeLU(ActivationFunction):
             elif n%2 != 0: cn = 0
             
             else:
-                cn = (1/np.sqrt(2*np.pi)) * (-1)**(n/2 + 1) * factorial2(n-3) * a**(n-1) * (n+a**2) / (1 + a*a)**((n+1)/2)
+                cn = (1/np.sqrt(2*np.pi)) * (-1)**(n/2 + 1) * factorial2_custom(n-3) * a**(n-1) * (n+a**2) / (1 + a*a)**((n+1)/2)
             
             self.coeffs.append(self.s*cn)
             self.coeffs_normalized.append(self.s*cn/np.sqrt(factorial(n)))

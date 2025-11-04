@@ -39,12 +39,16 @@ class HermiteSeries(Integral):
 
         rho_powers = np.array([rho**n for n in range(N+1)])
         
-        g1_coeffs = np.asarray(g1.calc_coefficients(N, normalized=True))
-        g2_coeffs = np.asarray(g2.calc_coefficients(N, normalized=True))
+        g1_coeffs = np.asarray(g1.calc_coefficients(N))
+        g2_coeffs = np.asarray(g2.calc_coefficients(N))
+        
+        for i in range(N):
+            g1_coeffs[i] /= np.sqrt(factorial(i))
+            g2_coeffs[i] /= np.sqrt(factorial(i))
         
         return float(np.sum(g1_coeffs * g2_coeffs * rho_powers))
 
-    @staticmethod        
+    @staticmethod
     def J2(C, g: ActivationFunction, N=10) -> float:
         
         std1, std2 = np.diagonal(C)
@@ -55,11 +59,9 @@ class HermiteSeries(Integral):
         
         rho = C[0, 1] / (std1 * std2)
         
-        K = max(N, 1)
+        g2_coeff = g.calc_coefficients(10)
         
-        g2_coeffs = g.calc_coefficients(K, normalized=False)
-        
-        return rho * g2_coeffs[1]
+        return std1 * rho * g2_coeff[1]
 
     @staticmethod
     def I21(C, g: ActivationFunction, N=10) -> float:
@@ -71,15 +73,14 @@ class HermiteSeries(Integral):
         
         rho = C[0,1] / (std1 * std2)
         
-        K = max(N, 3)
         
-        g_coeffs = g.calc_coefficients(K, normalized=False)
+        g_coeffs = g.calc_coefficients(3)
         
         h1 = g_coeffs[1]
         h3 = g_coeffs[3]
         
-        return float(rho * (h1 + h3))
-    
+        return float(std2 * rho * (h1 + h3))
+
     @staticmethod
     def I22(C, g: ActivationFunction, N=10) -> float:
         """  """
@@ -89,15 +90,13 @@ class HermiteSeries(Integral):
         
         rho = C[0,1] / (std1 * std2)
         
-        K = max(N, 3)
-        
-        g_coeffs = g.calc_coefficients(K, normalized=False)
+        g_coeffs = g.calc_coefficients(3)
         
         h1 = g_coeffs[1]
         h3 = g_coeffs[3]
         
-        return float((h1 + (rho**2) * h3))
-    
+        return float((std2**2 / std1) * (h1 + (rho**2) * h3))
+
     @staticmethod
     def I3(C, g1: ActivationFunction, g3: ActivationFunction, N=10) -> float:
         
@@ -116,8 +115,8 @@ class HermiteSeries(Integral):
 
         rho13_powers_factor = np.array([rho13**n/factorial(n) for n in range(N+1)])
 
-        g1_coeffs = g1.calc_coefficients(N, normalized=False)
-        g3_coeffs = g3.calc_coefficients(N, normalized=False)
+        g1_coeffs = g1.calc_coefficients(N)
+        g3_coeffs = g3.calc_coefficients(N)
 
         sum1 = np.sum(rho13_powers_factor[:N-1]*g1_coeffs[2:]*g3_coeffs[0:N-1])
         sum2 = np.sum(rho13_powers_factor[:N]*g1_coeffs[1:]*g3_coeffs[1:])

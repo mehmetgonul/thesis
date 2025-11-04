@@ -211,6 +211,7 @@ def change_in_Q1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
         for l in range(k):
             dq[k, l] = dq[l, k]
 
+
     return dq / D
     
 
@@ -394,59 +395,54 @@ def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config
     T1_analytical = np.zeros((K, K))
     
     max_step = 125
-    
-    try:
-        while step < max_step:
-                
-            # evolving the spike
-            for k, l in product(range(K), range(K)):
-                Q1_analytical[k,l] = np.sum(Spikes*q_analytical[k,l]) / D
-                R1_analytical[k,l] = np.sum(Spikes*r_analytical[k,l]) / D
-                T1_analytical[k,l] = np.sum(Spikes*t_analytical[k,l]) / D
-                
-                # low_rank == D means a real data set is being used
-                # in a real dataset everything is treated as a spike
-                if low_rank == D:
-                    Q1_analytical[k,l] += Q1Bulk_analytical[k,l]
-                    R1_analytical[k,l] += R1Bulk_analytical[k,l]
-                    T1_analytical[k,l] += T1Bulk_analytical[k,l]
+    while step < max_step:
             
-            # NOTE: in the prior work at each step new order parameters are computed.
-            # NOTE: as a change, we evolve them independently
-            dt = change_in_T(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
-            dq = change_in_Q1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
-            dr = change_in_R1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
-            dt0 = change_in_T0(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        # evolving the spike
+        for k, l in product(range(K), range(K)):
+            Q1_analytical[k,l] = np.sum(Spikes*q_analytical[k,l]) / D
+            R1_analytical[k,l] = np.sum(Spikes*r_analytical[k,l]) / D
+            T1_analytical[k,l] = np.sum(Spikes*t_analytical[k,l]) / D
+            
+            # low_rank == D means a real data set is being used
+            # in a real dataset everything is treated as a spike
+            if low_rank == D:
+                Q1_analytical[k,l] += Q1Bulk_analytical[k,l]
+                R1_analytical[k,l] += R1Bulk_analytical[k,l]
+                T1_analytical[k,l] += T1Bulk_analytical[k,l]
+        
+        # NOTE: in the prior work at each step new order parameters are computed.
+        # NOTE: as a change, we evolve them independently
+        dt = change_in_T(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        dq = change_in_Q1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        dr = change_in_R1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        dt0 = change_in_T0(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
 
-            if low_rank != D: 
-                # since in the synthetic dataset there are bulks, we also have to evolve them
-                dR1Bulk_analytical = change_in_RBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, R1Bulk_analytical, lr, K, D, integrals)
-                dT1Bulk_analytical = change_in_TBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, T1Bulk_analytical, lr, K, D, integrals)
-                    
-            
-            # TODO: change the ode solving method 
-            t_analytical += dt * dstep
-            q_analytical += dq * dstep
-            r_analytical += dr * dstep
-            T0_analytical += dt0 * dstep
-
-            step += dstep
-
-            if low_rank != D:
-                R1Bulk_analytical += dR1Bulk_analytical * dstep
-                T1Bulk_analytical += dT1Bulk_analytical * dstep
+        if low_rank != D: 
+            # since in the synthetic dataset there are bulks, we also have to evolve them
+            dR1Bulk_analytical = change_in_RBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, R1Bulk_analytical, lr, K, D, integrals)
+            dT1Bulk_analytical = change_in_TBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, T1Bulk_analytical, lr, K, D, integrals)
                 
-            # compute analytical test loss
-            loss, _ = test_error_with_order_parameters(T0_analytical, T1_analytical, Q1_analytical, R1_analytical, omega, integrals)
+        
+        # TODO: change the ode solving method 
+        t_analytical += dt * dstep
+        q_analytical += dq * dstep
+        r_analytical += dr * dstep
+        T0_analytical += dt0 * dstep
+
+        step += dstep
+
+        if low_rank != D:
+            R1Bulk_analytical += dR1Bulk_analytical * dstep
+            T1Bulk_analytical += dT1Bulk_analytical * dstep
             
-            analytical_solutions_results["T0"].append(T0_analytical)
-            analytical_solutions_results["T"].append(T1_analytical)
-            analytical_solutions_results["Q1"].append(q_analytical)
-            analytical_solutions_results["R1"].append(r_analytical)
-            analytical_solutions_results["loss"].append(loss)
-            
-    except Exception as e:
-        pass
+        # compute analytical test loss
+        loss, _ = test_error_with_order_parameters(T0_analytical, T1_analytical, Q1_analytical, R1_analytical, omega, integrals)
+        
+        analytical_solutions_results["T0"].append(T0_analytical)
+        analytical_solutions_results["T"].append(T1_analytical)
+        analytical_solutions_results["Q1"].append(q_analytical)
+        analytical_solutions_results["R1"].append(r_analytical)
+        analytical_solutions_results["loss"].append(loss)
 
     # plot analytical results
     plot_graph(

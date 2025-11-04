@@ -19,6 +19,6 @@ runs:
     D: 1024
     K: 4
 
-plot_name: "GeLU on CIFAR-10 (K=2)"
+plot_name: "GeLU on CIFAR-10 (K=4)"
 x_label: "α"
 y_label: "Generalization error"

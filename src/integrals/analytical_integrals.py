@@ -184,7 +184,6 @@ class ReLUAnalyticIntegral:
         C11 = C[0,0]
         C12 = C[0,1]
         C13 = C[0,2]
-        # C22 = C[1,1] #not used
         C23 = C[1,2]
         C33 = C[2,2]
 
