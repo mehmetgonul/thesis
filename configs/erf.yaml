@@ -1,24 +1,25 @@
-run_name: "erf_cifar10_k2"
+run_name: "rg45"
 
 runs:
   - data_manager:
-      dataset: "cifar-10"
+      dataset: "random"
       gaussian: false
       rank: 1
       batch_size: 10000
       noise: 0.0
     activation_function: "erf"
     tied: false
-    bias: false
+    bias: true
     training_method: "analytical_integrals"
     learning_rate: 1.0
-    step_count: 125
+    step_count: 10
     N: null
     line_type: "solid"
     line_color: "green"
     D: 1024
     K: 2
 
-plot_name: "ERF on CIFAR-10 (K=4)"
+
+plot_name: "rg45"
 x_label: "α"
 y_label: "Generalization error"

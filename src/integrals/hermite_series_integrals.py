@@ -1,9 +1,10 @@
 import numpy as np
-from src.activation_functions import ActivationFunction
+from src.activation_functions.activation_function import ActivationFunction
 from src.integrals.integrals import Integral
 from scipy.special import hermitenorm, factorial, factorial2, erf
 
 from numpy.polynomial.hermite_e import HermiteE, hermegauss
+import functools
 
 class HermiteWrapper():
     def __init__(self, g: ActivationFunction):
@@ -12,22 +13,22 @@ class HermiteWrapper():
     def I2(self, C):
         return HermiteSeries.I2(C, self.g, self.g)
     
-    def J2(self, C, N=10):
+    def J2(self, C, N=30):
         return HermiteSeries.J2(C, self.g, N)
 
-    def I21(self, C, N=10):
+    def I21(self, C, N=30):
         return HermiteSeries.I21(C, self.g, N)
 
-    def I22(self, C, N=10):
+    def I22(self, C, N=30):
         return HermiteSeries.I22(C, self.g, N)
 
-    def I3(self, C, N=10):
+    def I3(self, C, N=30):
         return HermiteSeries.I3(C, self.g, self.g, N)
 
 
 class HermiteSeries(Integral):
     @staticmethod
-    def I2(C, g1: ActivationFunction, g2: ActivationFunction, N=10) -> float:
+    def I2(C, g1: ActivationFunction, g2: ActivationFunction, N=30) -> float:
         """Computing the I2 integral using hermite series"""
         
         std1, std2 = np.sqrt(np.diagonal(C))
@@ -49,7 +50,7 @@ class HermiteSeries(Integral):
         return float(np.sum(g1_coeffs * g2_coeffs * rho_powers))
 
     @staticmethod
-    def J2(C, g: ActivationFunction, N=10) -> float:
+    def J2(C, g: ActivationFunction, N=30) -> float:
         
         std1, std2 = np.diagonal(C)
         std1 = np.sqrt(std1)
@@ -59,7 +60,7 @@ class HermiteSeries(Integral):
         
         rho = C[0, 1] / (std1 * std2)
         
-        g2_coeff = g.calc_coefficients(10)
+        g2_coeff = g.calc_coefficients(N)
         
         return std1 * rho * g2_coeff[1]
 
@@ -82,7 +83,7 @@ class HermiteSeries(Integral):
         return float(std2 * rho * (h1 + h3))
 
     @staticmethod
-    def I22(C, g: ActivationFunction, N=10) -> float:
+    def I22(C, g: ActivationFunction, N=30) -> float:
         """  """
         std1, std2 = np.sqrt(np.diagonal(C))
         
@@ -98,7 +99,7 @@ class HermiteSeries(Integral):
         return float((std2**2 / std1) * (h1 + (rho**2) * h3))
 
     @staticmethod
-    def I3(C, g1: ActivationFunction, g3: ActivationFunction, N=10) -> float:
+    def I3(C, g1: ActivationFunction, g3: ActivationFunction, N=30) -> float:
         
         std = np.sqrt(np.diagonal(C))
 

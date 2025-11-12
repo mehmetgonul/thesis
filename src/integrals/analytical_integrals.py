@@ -3,6 +3,7 @@
 import math
 import numpy as np
 from src.integrals.integrals import Integral
+import functools
 
 def analytical_integral_factory(activation_function: str):
     if activation_function.lower() == "erf":
@@ -37,10 +38,11 @@ class SigmoidAnalyticIntegral(Integral):
         c22 = C[1, 1]
 
         denom = 1.0 + c22
-
+        # print(f"c22 (J2): {c22}")
         val = math.sqrt(2.0 / math.pi) * (c12 / math.sqrt(denom))
         
         return val
+    
     @staticmethod
     def I3(C: np.ndarray) -> float:
         

@@ -6,7 +6,7 @@ from src.autoencoder import AutoEncoder
 from src.data_managers import *
 from src.config import ExperimentConfig
 from src.integrals.integrals import Integral
-from src.plot import *
+from scipy.integrate import solve_ivp
 
 def compute_order_parameters_from_weights(model: AutoEncoder, omega):
     W = model.encoder.weight.data.detach().cpu().numpy()
@@ -122,6 +122,7 @@ def change_in_T(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
             dt[k,l] = dt[l, k]
             
     return dt / D
+
     
 
 def change_in_T0(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
@@ -335,6 +336,114 @@ def change_in_RBulk(q, r, t, rhos, T0, Q1, R1, T1, R1_bulk, lr, K, D, integrals:
         
     return dR
 
+def set_size_dict(D: int, K: int, low_rank: int):
+    return {"D": D, "K": K, "low_rank": low_rank, "bulk": (low_rank != D)}
+
+def pack_order_params(state: dict[str, np.ndarray], sizes: dict[str, int]):
+    K, L = sizes["K"], sizes["low_rank"]
+    
+    pack = [
+        state["q"].reshape(-1),
+        state["r"].reshape(-1),
+        state["t"].reshape(-1),
+        state["T0"].reshape(-1),
+    ]
+    
+    if sizes["bulk"]:
+        pack += [
+            state["R1bulk"].reshape(-1),
+            state["T1bulk"].reshape(-1)
+        ]
+        
+    return np.concatenate(pack)
+    
+def unpack_order_params(state: dict[str, np.ndarray], sizes: dict[str, int]):
+    K, L = sizes["K"], sizes["low_rank"]
+    
+    pt = 0
+    
+    n = K * K * L
+    
+    q = state[pt:pt+n].reshape(K, K, L)
+    pt += n
+    
+    r = state[pt:pt+n].reshape(K, K, L)
+    pt += n
+    
+    t = state[pt:pt+n].reshape(K, K, L)
+    pt += n
+
+    n = K * K
+    T0 = state[pt:pt+n].reshape(K, K)
+    pt += n
+    
+    
+    R1bulk, T1bulk = None, None
+    if sizes["bulk"]:
+        R1bulk = state[pt:pt+n].reshape(K, K)
+        pt += n
+        T1bulk = state[pt:pt+n].reshape(K, K)
+        pt += n
+    
+    
+    return q, r, t, T0, R1bulk, T1bulk
+
+import time
+
+def solve_ODE(alpha, state, params):
+    sizes = params["sizes"]
+
+    D, K, low_rank = sizes["D"], sizes["K"], sizes["low_rank"]
+    Q1Bulk = params["Q1Bulk"]
+    rhos, Spikes = params["rhos"], params["Spikes"]
+    integrals, lr = params["integrals"], params["lr"]
+    
+    bulk = low_rank != D
+    
+    q, r, t, T0, R1Bulk, T1Bulk = unpack_order_params(state, sizes)
+    
+    Q1_analytical, R1_analytical, T1_analytical = np.zeros((K, K)), np.zeros((K, K)), np.zeros((K, K))
+    for k, l in product(range(K), range(K)):
+        Q1_analytical[k, l] = (np.sum(Spikes * q[k, l]) / D)
+        R1_analytical[k, l] = (np.sum(Spikes * r[k, l]) / D)
+        T1_analytical[k, l] = (np.sum(Spikes * t[k, l]) / D)
+        
+
+    if bulk:
+        Q1_analytical += Q1Bulk
+        R1_analytical += R1Bulk
+        T1_analytical += T1Bulk
+
+    print(f"Time: {time.time()}")
+
+
+    dR1Bulk, dT1Bulk = None, None
+    if bulk:
+        dt = change_in_T(q, r, t, Spikes, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        dq = change_in_Q1(q, r, t, Spikes, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        dr = change_in_R1(q, r, t, Spikes, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        
+        dR1Bulk = change_in_RBulk(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, R1Bulk, lr, K, D, integrals)
+        dT1Bulk = change_in_TBulk(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, T1Bulk, lr, K, D, integrals)
+    else:
+        dt = change_in_T(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        dq = change_in_Q1(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        dr = change_in_R1(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+            
+    dT0 = change_in_T0(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+    
+    
+    packed_order_params = pack_order_params({
+        "q": dq,
+        "r": dr,
+        "t": dt,
+        "T0": dT0,
+        "R1bulk": dR1Bulk,
+        "T1bulk": dT1Bulk
+    }, sizes)
+    
+    return packed_order_params
+        
 
 def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config: ExperimentConfig):
     
@@ -348,9 +457,10 @@ def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config
         scale=False,
         bias=True
     )
+    print(f"low rank: {low_rank}")
 
     # setup the data manager
-    data_manager = DataManager(dataset=dataset, rank=1, D=D, noise=noise, gaussian=gaussian)
+    data_manager = DataManager(41, 120, dataset=dataset, rank=low_rank, D=D, noise=noise, gaussian=gaussian)
 
     trainloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_trainloader()
     testloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_testloader()
@@ -358,7 +468,7 @@ def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config
     psis = eigenvectors * np.sqrt(D)
     rhos = eigenvalues
     
-    step = 0
+    step = 0.
     dstep = 1.0/D
     
     # training the analytical integrals (if activation function has any)
@@ -373,9 +483,9 @@ def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config
 
     q, r, t = calculate_densities_from_weights(model, omega, psis, rhos)
     for k, l in product(range(K), range(K)):
-        Q1bulk[k,l] = np.sum(Bulk*q[k,l,:-low_rank])
-        R1bulk[k,l] = np.sum(Bulk*r[k,l,:-low_rank])
-        T1bulk[k,l] = np.sum(Bulk*t[k,l,:-low_rank])
+        Q1bulk[k,l] = np.sum(Bulk*q[k,l,:-low_rank]) / D
+        R1bulk[k,l] = np.sum(Bulk*r[k,l,:-low_rank]) / D
+        T1bulk[k,l] = np.sum(Bulk*t[k,l,:-low_rank]) / D
 
     q_analytical, r_analytical, t_analytical = (q.T[-low_rank:]).T, (r.T[-low_rank:]).T , (t.T[-low_rank:]).T
     Q1Bulk_analytical, R1Bulk_analytical, T1Bulk_analytical = Q1bulk, R1bulk, T1bulk
@@ -394,61 +504,131 @@ def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config
     R1_analytical = np.zeros((K, K))
     T1_analytical = np.zeros((K, K))
     
-    max_step = 125
-    while step < max_step:
-            
-        # evolving the spike
+    max_step = 200
+    
+
+    sizes = set_size_dict(D, K, low_rank)
+    params = {
+        "sizes": sizes,
+        "Q1Bulk": Q1Bulk_analytical,
+        "rhos": rhos,
+        "Spikes": Spikes,
+        "integrals": integrals,
+        "lr": lr
+    }
+    state = {
+        "q": q_analytical,
+        "r": r_analytical,
+        "t": t_analytical,
+        "T0": T0_analytical,
+        "R1bulk": R1Bulk_analytical,
+        "T1bulk": T1Bulk_analytical
+    }
+    initial_state = pack_order_params(state, sizes)
+    
+    
+    sol = solve_ivp(
+        fun=lambda alpha, y: solve_ODE(alpha, y, params),
+        t_span=(0, max_step),
+        t_eval=None,
+        y0=initial_state,
+        method="RK45",
+        rtol=1e-6,
+        atol=1e-9,
+        max_step=np.inf,
+    )
+    
+    analytical_solutions_results = {"T": [], "T0": [], "Q1": [], "R1": [], "loss": []}
+    print(sol)
+    for col in range(sol.y.shape[1]):
+        q, r, t, T0, R1Bulk, T1Bulk = unpack_order_params(sol.y[:, col], sizes)
+
+        # Vectorized rebuild of order-parameter matrices
+        Q1_analytical, R1_analytical, T1_analytical = np.zeros((K, K)), np.zeros((K, K)), np.zeros((K, K))
         for k, l in product(range(K), range(K)):
-            Q1_analytical[k,l] = np.sum(Spikes*q_analytical[k,l]) / D
-            R1_analytical[k,l] = np.sum(Spikes*r_analytical[k,l]) / D
-            T1_analytical[k,l] = np.sum(Spikes*t_analytical[k,l]) / D
+            Q1_analytical[k, l] = (np.sum(Spikes * q[k, l]) / D)
+            R1_analytical[k, l] = (np.sum(Spikes * r[k, l]) / D)
+            T1_analytical[k, l] = (np.sum(Spikes * t[k, l]) / D)
             
-            # low_rank == D means a real data set is being used
-            # in a real dataset everything is treated as a spike
-            if low_rank == D:
-                Q1_analytical[k,l] += Q1Bulk_analytical[k,l]
-                R1_analytical[k,l] += R1Bulk_analytical[k,l]
-                T1_analytical[k,l] += T1Bulk_analytical[k,l]
-        
-        # NOTE: in the prior work at each step new order parameters are computed.
-        # NOTE: as a change, we evolve them independently
-        dt = change_in_T(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
-        dq = change_in_Q1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
-        dr = change_in_R1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
-        dt0 = change_in_T0(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
-
-        if low_rank != D: 
-            # since in the synthetic dataset there are bulks, we also have to evolve them
-            dR1Bulk_analytical = change_in_RBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, R1Bulk_analytical, lr, K, D, integrals)
-            dT1Bulk_analytical = change_in_TBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, T1Bulk_analytical, lr, K, D, integrals)
-                
-        
-        # TODO: change the ode solving method 
-        t_analytical += dt * dstep
-        q_analytical += dq * dstep
-        r_analytical += dr * dstep
-        T0_analytical += dt0 * dstep
-
-        step += dstep
-
+    
         if low_rank != D:
-            R1Bulk_analytical += dR1Bulk_analytical * dstep
-            T1Bulk_analytical += dT1Bulk_analytical * dstep
-            
-        # compute analytical test loss
-        loss, _ = test_error_with_order_parameters(T0_analytical, T1_analytical, Q1_analytical, R1_analytical, omega, integrals)
-        
-        analytical_solutions_results["T0"].append(T0_analytical)
+            Q1_analytical += Q1bulk
+            R1_analytical += R1Bulk
+            T1_analytical += T1Bulk
+
+        loss, _ = test_error_with_order_parameters(T0, T1_analytical, Q1_analytical, R1_analytical, omega, integrals)
+        if (loss < 0):
+            print(f"negative loss {loss}")
+        analytical_solutions_results["T0"].append(T0)
         analytical_solutions_results["T"].append(T1_analytical)
-        analytical_solutions_results["Q1"].append(q_analytical)
-        analytical_solutions_results["R1"].append(r_analytical)
+        analytical_solutions_results["Q1"].append(Q1_analytical)
+        analytical_solutions_results["R1"].append(R1_analytical)
         analytical_solutions_results["loss"].append(loss)
 
-    # plot analytical results
-    plot_graph(
-        values=analytical_solutions_results["loss"],
-        x_title=f"{config.x_label}",
-        y_title=f"{config.y_label}",
-        plot_title=f"{config.plot_name}",
-        D=D
-    )
+    print(f"len of steps {len(analytical_solutions_results['loss'])}")
+
+    return sol.t, analytical_solutions_results["loss"]
+    
+    # NOTE: The following part is deprecated
+
+    # else:
+    
+    #     while step < max_step:
+                
+    #         # evolving the spike
+    #         for k, l in product(range(K), range(K)):
+    #             Q1_analytical[k,l] = np.sum(Spikes*q_analytical[k,l]) / D
+    #             R1_analytical[k,l] = np.sum(Spikes*r_analytical[k,l]) / D
+    #             T1_analytical[k,l] = np.sum(Spikes*t_analytical[k,l]) / D
+                
+    #             # low_rank == D means a real data set is being used
+    #             # in a real dataset everything is treated as a spike
+    #             if low_rank == D:
+    #                 Q1_analytical[k,l] += Q1Bulk_analytical[k,l]
+    #                 R1_analytical[k,l] += R1Bulk_analytical[k,l]
+    #                 T1_analytical[k,l] += T1Bulk_analytical[k,l]
+            
+    #         # NOTE: in the prior work at each step new order parameters are computed.
+    #         # NOTE: as a change, we evolve them independently
+            
+    #         if low_rank == D:
+    #             dt = change_in_T(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+    #             dq = change_in_Q1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+    #             dr = change_in_R1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+    #         else:
+    #             dt = change_in_T(q_analytical, r_analytical, t_analytical, Spikes, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+    #             dq = change_in_Q1(q_analytical, r_analytical, t_analytical, Spikes, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+    #             dr = change_in_R1(q_analytical, r_analytical, t_analytical, Spikes, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+                
+    #         dt0 = change_in_T0(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+
+    #         if low_rank != D: 
+    #             # since in the synthetic dataset there are bulks, we also have to evolve them
+    #             dR1Bulk_analytical = change_in_RBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, R1Bulk_analytical, lr, K, D, integrals)
+    #             dT1Bulk_analytical = change_in_TBulk(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, T1Bulk_analytical, lr, K, D, integrals)
+            
+    #         # t_analytical = solve_ivp(solve_T, method="RK45")
+    #         t_analytical += dt * dstep
+    #         q_analytical += dq * dstep
+    #         r_analytical += dr * dstep
+    #         T0_analytical += dt0 * dstep
+    #         # print(f"step: {step}")
+    #         step += dstep
+    #         print(f"step: {step}")
+
+    #         if low_rank != D:
+    #             R1Bulk_analytical += dR1Bulk_analytical * dstep
+    #             T1Bulk_analytical += dT1Bulk_analytical * dstep
+                
+    #         # compute analytical test loss
+    #         loss, _ = test_error_with_order_parameters(T0_analytical, T1_analytical, Q1_analytical, R1_analytical, omega, integrals)
+            
+    #         analytical_solutions_results["T0"].append(T0_analytical)
+    #         analytical_solutions_results["T"].append(T1_analytical)
+    #         analytical_solutions_results["Q1"].append(q_analytical)
+    #         analytical_solutions_results["R1"].append(r_analytical)
+    #         analytical_solutions_results["loss"].append(loss)
+
+    # print("completed")
+
+    # return analytical_solutions_results["loss"]

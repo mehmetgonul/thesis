@@ -1,11 +1,11 @@
 from src.integrals.analytical_integrals import analytical_integral_factory
 from src.integrals.hermite_series_integrals import HermiteSeries, HermiteWrapper
-from src.activation_functions import activation_function_factory
+from src.activation_functions.erf import *
 from src.integrals.hermite_series_integrals import HermiteSeries
 from src.data_managers import DataManager
 from src.autoencoder import AutoEncoder
 from src.order_parameters import simulate
-from src.plot import plot_graph
+import matplotlib.pyplot as plt
 from src.config import ExperimentConfig, RunConfig, DataManagerConfig, parse_config
 
 import torch.nn.functional as F
@@ -14,6 +14,24 @@ import numpy as np
 import os
 import sys
 import random
+
+def activation_function_factory(activation_function: str, **kwargs):
+    
+    activation_function = activation_function.lower()
+    
+    if activation_function == "erf":
+        return Erf(**kwargs)
+    # elif activation_function == "relu":
+    #     return ReLU(**kwargs)
+    # elif activation_function == "linear":
+    #     return Linear()
+    # elif activation_function == "gelu":
+    #     return GeLU(**kwargs)
+    # elif activation_function == "exponential" or activation_function == "exp": # TODO: repo has mixed usage, unify it sometime
+    #     return Exponential(**kwargs)
+    else:
+        raise ValueError(f"Unknown activation function: {activation_function}")
+    
 
 
 config: ExperimentConfig = parse_config(sys.argv[1])
@@ -24,7 +42,7 @@ random.seed(SEED)
 np.random.seed(SEED)
 torch.manual_seed(SEED)
 
-
+results = []
 for run in config.runs:
     dm_config = run.data_manager
     print(run)
@@ -63,7 +81,7 @@ for run in config.runs:
         layers=1,
         g=act_func.torch_fn,
         tied=run.tied,
-        scale=False,
+        scale=1/D,
         bias=run.bias
     )
     
@@ -78,22 +96,25 @@ for run in config.runs:
     else:
         raise ValueError()
 
-
+    
+    import time
+    s = time.time()
 
     if 'integral' in locals():
-        simulate(D, K, act_func, low_rank, dataset, noise, gaussian, lr, integral, config=config)
-
+        alpha, generalization_error = simulate(D, K, act_func, low_rank, dataset, noise, gaussian, lr, integral, config=config)
+        results.append({"method": run.training_method, "alpha": alpha, "ge": generalization_error, "D": D, "color": run.line_color, "style": run.line_type})
+        del integral
     else:
         # online learning, no epochs
-        data_manager = DataManager(dataset=dataset, rank=1, D=D, noise=noise, gaussian=gaussian)
+        data_manager = DataManager(seed= SEED, alpha=120, dataset=dataset, rank=dm_config.rank, D=D, noise=noise, gaussian=gaussian, online=True)
 
         trainloader, _ = data_manager.get_trainloader()
         testloader, _ = data_manager.get_testloader()
 
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
         model.to(device)
 
-        optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+        optimizer = torch.optim.SGD(model.parameters(), lr=(lr/D))
         criterion = torch.nn.MSELoss()
 
         online_learning_results = {
@@ -105,13 +126,13 @@ for run in config.runs:
         step = 0
         print("online")
         
-        
+        train_iter = iter(trainloader)
         while step < 120:    
             try:
-                inputs, _ = next(iter(trainloader))
+                inputs, _ = next(train_iter)
             except StopIteration:
-                trainloader, _ = data_manager.get_trainloader()
-                inputs, _ = next(iter(trainloader))
+                train_iter = iter(trainloader)
+                inputs, _ = next(train_iter)
             inputs = inputs.to(device)
             
             model.train()
@@ -124,12 +145,14 @@ for run in config.runs:
             optimizer.step()
             
             online_learning_results["train_loss"].append(loss.item())
+            print(f"loss: {loss}")
             online_learning_results["steps"].append(step)
 
             model.eval()
             test_loss = 0.0
             with torch.no_grad():
                 for test_inputs, _ in testloader:
+                    test_inputs = test_inputs.to(device)
                     test_outputs = model(test_inputs)
                     t_loss = criterion(test_outputs, test_inputs)
                     test_loss += t_loss.item()
@@ -138,7 +161,7 @@ for run in config.runs:
             online_learning_results["test_loss"].append(avg_test_loss)
             print(f'Step {step}, Train Loss: {loss.item():.4f}, Test Loss: {avg_test_loss:.4f}')
 
-            step += 1
+            step += 1 / D
 
         # final eval
         model.eval()
@@ -152,18 +175,31 @@ for run in config.runs:
         avg_final_test_loss = final_test_loss / len(testloader)
         print(f'Final Test Loss: {avg_final_test_loss:.4f}')
 
-        # plot online learning results
-        plot_graph(
-            values=online_learning_results["train_loss"],
-            x_title="Step",
-            y_title="Train Loss",
-            plot_title="Online Learning Train Loss through steps"
-        )
+        results.append({"method": run.training_method, "ge": online_learning_results["test_loss"], "D": D, "color": run.line_color, "style": run.line_type})
+    
+    print(f"Time taken: {(time.time() - s) / 60} min")
 
-        plot_graph(
-            values=online_learning_results["test_loss"],
-            x_title="Step",
-            y_title="Test Loss",
-            plot_title="Online Learning Test Loss through steps"
-        )
-        
+for res in results:
+    ge = res["ge"]
+    print(res["alpha"][-1])
+    step_count = np.arange(0, (res["alpha"][-1]) + 1)
+    plt.plot(
+        res["alpha"],
+        ge,
+        color=res["color"],
+        linestyle=res["style"],
+        label=res["method"],
+    )
+    
+plt.xlabel(config.x_label)
+plt.ylabel(config.y_label)
+plt.title(config.plot_name)
+plt.grid(True)
+plt.legend(title="Runs")
+
+safe_title = config.plot_name.replace(" ", "_").lower()
+safe_x = config.x_label.replace(" ", "_").lower()
+safe_y = config.y_label.replace(" ", "_").lower()
+
+plt.savefig(f"{safe_title}_{safe_x}_{safe_y}.png")
+plt.close()

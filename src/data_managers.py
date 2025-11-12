@@ -1,26 +1,26 @@
 import torch
 from torchvision import transforms, datasets
 import numpy as np
+from torch.utils.data import DataLoader, RandomSampler
 
 class DataManager:
     
-    def __init__(self, dataset: str, rank: int, D: int, noise: float, gaussian: bool):
-        
+    def __init__(self, seed: int, alpha: int, dataset: str, rank: int, D: int, noise: float, gaussian: bool, online: bool = False):
+        self.seed = seed
+        self.alpha = alpha
         self.dataset = dataset
         self.rank = rank
         self.D = D
         self.noise = noise
         self.gaussian = gaussian
+        self.online = online
     
     def _preprocess_data(self, dataset, mean: float = 0.5, std: float = 0.5):
         data_size = dataset.data.shape[0]
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=data_size, shuffle=False)
         
         xs, ys = next(iter(dataloader))
-        xs = xs.squeeze().reshape(xs.shape[0], (xs.shape[-1] ** 2))
-        
-        # TODO: implement a check for interpolation (usually shouldn't even be necessary)
-        # xs = torch.nn.functional.interpolate(xs.unsqueeze(0), size=self.D).squeeze()
+        xs = xs.view(xs.shape[0], -1)
         
         xs -= xs.mean()
         xs /= xs.std()*2
@@ -49,10 +49,12 @@ class DataManager:
             eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
     
             A = torch.randn(self.rank, self.D)
-            c = torch.rand(self.batch_size, self.rank) * eigenvalues.unsqueeze(0).repeat(self.batch_size, 1)
+            c = torch.randn(10_000, self.rank) * eigenvalues.unsqueeze(0).repeat(10_000, 1)
 
             # data model
-            trainset = (c @ A) + (self.noise * torch.randn(10_000, self.D) )
+            xs = (c @ A) + (self.noise * torch.randn(10_000, self.D) )
+            ys = torch.randint(0, 10, (10_000,)) # Dummy labels
+            trainset = torch.utils.data.TensorDataset(xs, ys)
 
         else: 
             raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")
@@ -61,20 +63,37 @@ class DataManager:
             trainset = self._preprocess_data(trainset)
         
         # this in principle only work with cifar and mnist
+        omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(trainset)
         if self.gaussian:
-            omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(trainset)
             xs = np.random.randn(len(trainset), trainset[0][0].numel()) @ sqrt_omega
             xs = torch.from_numpy(xs).float()
             ys = trainset.tensors[1]
             trainset = torch.utils.data.TensorDataset(xs, ys)
             
-            trainloader = torch.utils.data.DataLoader(trainset, batch_size=1,
-                                            shuffle=True, pin_memory=True)
+        if self.online:
+            gen = torch.Generator()
+            gen.manual_seed(self.seed)
+            random_sampler = RandomSampler(
+                trainset,
+                replacement=True,
+                num_samples= self.D * self.alpha,
+                generator=gen
+            )
             
+            trainloader = DataLoader(
+                trainset,
+                batch_size=1,
+                sampler=random_sampler,
+                # num_workers=2,
+                # prefetch_factor=1,
+                # pin_memory=True,
+            )
+        
         else:
-            trainloader = torch.utils.data.DataLoader(trainset, batch_size=1,
-                                            shuffle=True)
-            omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(trainset)
+            trainloader = DataLoader(
+                trainset,
+                batch_size=1,
+            )
         
         
         return trainloader, (omega, sqrt_omega, eigenvalues, eigenvectors)
@@ -99,7 +118,7 @@ class DataManager:
             eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
     
             A = torch.randn(self.rank, self.D)
-            c = torch.rand(self.batch_size, self.rank) * eigenvalues.unsqueeze(0).repeat(self.batch_size, 1)
+            c = torch.randn(10_000, self.rank) * eigenvalues.unsqueeze(0).repeat(10_000, 1)
 
             # data model
             xs = (c @ A) + (self.noise * torch.randn(10_000, self.D) )
@@ -113,26 +132,25 @@ class DataManager:
         if self.dataset != "random":
             testset = self._preprocess_data(testset)
         
+        omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(testset)
         if self.gaussian:
-            # x ∼ N(0, omega)
-            
-            omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(testset)
-            
             xs = np.random.randn(len(testset), testset[0][0].numel()) @ sqrt_omega
             xs = torch.from_numpy(xs).float()
             ys = testset.tensors[1]
             testset = torch.utils.data.TensorDataset(xs, ys)
-
-            testloader = torch.utils.data.DataLoader(testset, batch_size=10000,
-                                                shuffle=False)
-            
-        else:
-            omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(testset)
-            testloader = torch.utils.data.DataLoader(testset, batch_size=10000,
-                                                shuffle=False)
             
         
+        testloader = DataLoader(
+            testset,
+            batch_size=len(testset),
+            # num_workers=2,
+            # prefetch_factor=1,
+            # pin_memory=True,
+        )
+        
+        
         return testloader, (omega, sqrt_omega, eigenvalues, eigenvectors)
+
 
     def _compute_covariance(self, dataset):
         
