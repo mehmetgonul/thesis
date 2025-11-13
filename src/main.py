@@ -81,8 +81,8 @@ for run in config.runs:
         layers=1,
         g=act_func.torch_fn,
         tied=run.tied,
-        scale=1/D,
-        bias=run.bias
+        scale=True,
+        bias=False
     )
     
     if run.training_method == "analytical_integrals":
@@ -114,7 +114,7 @@ for run in config.runs:
         device = "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu")
         model.to(device)
 
-        optimizer = torch.optim.SGD(model.parameters(), lr=(lr/D))
+        optimizer = torch.optim.SGD(model.parameters(), lr=(lr))
         criterion = torch.nn.MSELoss()
 
         online_learning_results = {
@@ -125,15 +125,28 @@ for run in config.runs:
 
         step = 0
         print("online")
-        
+        alpha= []
         train_iter = iter(trainloader)
-        while step < 120:    
+        while step < 200:    
+            alpha.append(step)
             try:
                 inputs, _ = next(train_iter)
             except StopIteration:
                 train_iter = iter(trainloader)
                 inputs, _ = next(train_iter)
             inputs = inputs.to(device)
+            
+            test_loss = 0.0
+            with torch.no_grad():
+                model.eval()
+                for test_inputs, _ in testloader:
+                    test_inputs = test_inputs.to(device)
+                    test_outputs = model(test_inputs)
+                    t_loss = criterion(test_outputs, test_inputs)
+                    test_loss += t_loss.item()
+            
+            avg_test_loss = test_loss / len(testloader)
+            online_learning_results["test_loss"].append(avg_test_loss)
             
             model.train()
             
@@ -148,26 +161,17 @@ for run in config.runs:
             print(f"loss: {loss}")
             online_learning_results["steps"].append(step)
 
-            model.eval()
-            test_loss = 0.0
-            with torch.no_grad():
-                for test_inputs, _ in testloader:
-                    test_inputs = test_inputs.to(device)
-                    test_outputs = model(test_inputs)
-                    t_loss = criterion(test_outputs, test_inputs)
-                    test_loss += t_loss.item()
             
-            avg_test_loss = test_loss / len(testloader)
-            online_learning_results["test_loss"].append(avg_test_loss)
             print(f'Step {step}, Train Loss: {loss.item():.4f}, Test Loss: {avg_test_loss:.4f}')
 
-            step += 1 / D
+            step += 1/D
 
         # final eval
         model.eval()
         final_test_loss = 0.0
         with torch.no_grad():
             for test_inputs, _ in testloader:
+                test_inputs = test_inputs.to(device)
                 test_outputs = model(test_inputs)
                 t_loss = criterion(test_outputs, test_inputs)
                 final_test_loss += t_loss.item()
@@ -175,7 +179,7 @@ for run in config.runs:
         avg_final_test_loss = final_test_loss / len(testloader)
         print(f'Final Test Loss: {avg_final_test_loss:.4f}')
 
-        results.append({"method": run.training_method, "ge": online_learning_results["test_loss"], "D": D, "color": run.line_color, "style": run.line_type})
+        results.append({"method": run.training_method, "alpha": alpha, "ge": online_learning_results["test_loss"], "D": D, "color": run.line_color, "style": run.line_type})
     
     print(f"Time taken: {(time.time() - s) / 60} min")
 

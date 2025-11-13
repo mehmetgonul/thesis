@@ -1,4 +1,4 @@
-run_name: "erf-hermite_cifar10_k2"
+run_name: "online"
 
 runs:
   - data_manager:
@@ -10,15 +10,17 @@ runs:
     activation_function: "erf"
     tied: false
     bias: false
-    training_method: "hermite_integrals"
+    training_method: "sgd"
     learning_rate: 1.0
-    step_count: 125
+    step_count: 10
     N: null
     line_type: "solid"
     line_color: "green"
     D: 1024
-    K: 2
+    K: 6
 
-plot_name: "ERF-HERMİTE on CIFAR-10 (K=2)"
+
+
+plot_name: "online"
 x_label: "α"
 y_label: "Generalization error"

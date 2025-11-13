@@ -26,6 +26,7 @@ class SigmoidAnalyticIntegral(Integral):
         if C.shape[0] < 2 or C.shape[1] < 2:
             raise ValueError("Covariance matrix C must be at least 2x2 for I2.")
         res = C[0,1] / (math.sqrt(1 + C[0,0]) * math.sqrt(1 + C[1,1]))
+        # res = float(np.clip(res, -1.0 + 1e-9, 1.0 - 1e-9))
         return (2.0 * np.arcsin(res)) / np.pi
     
     @staticmethod
@@ -56,10 +57,8 @@ class SigmoidAnalyticIntegral(Integral):
         c23 = C[1, 2]
 
         denom = (1.0 + c11)*(1.0 + c33) - c13**2
-        if denom < 0:
-            denom_sqrt = 1e-8
-        else:
-            denom_sqrt = math.sqrt(denom)
+        # denom = max(denom, 1e-9)
+        denom_sqrt = math.sqrt(denom)
 
         numerator = c23*(1.0 + c11) - c12*c13
 

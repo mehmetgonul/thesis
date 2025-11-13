@@ -1,8 +1,26 @@
-run_name: "rg45"
+run_name: "K=4_rg45"
 
 runs:
   - data_manager:
-      dataset: "random"
+      dataset: "cifar-10"
+      gaussian: false
+      rank: 1
+      batch_size: 10000
+      noise: 0.0
+    activation_function: "erf"
+    tied: false
+    bias: true
+    training_method: "hermite_integrals"
+    learning_rate: 1.0
+    step_count: 10
+    N: null
+    line_type: "solid"
+    line_color: "green"
+    D: 1024
+    K: 4
+
+  - data_manager:
+      dataset: "cifar-10"
       gaussian: false
       rank: 1
       batch_size: 10000
@@ -15,9 +33,9 @@ runs:
     step_count: 10
     N: null
     line_type: "solid"
-    line_color: "green"
+    line_color: "blue"
     D: 1024
-    K: 2
+    K: 4
 
 
 plot_name: "rg45"
