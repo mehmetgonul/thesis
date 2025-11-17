@@ -1,7 +1,7 @@
-run_name: "K=4_rg45"
+run_name: "asK=4_rg45"
 
 runs:
-  - data_manager:
+  - dm_config:
       dataset: "cifar-10"
       gaussian: false
       rank: 1
@@ -18,8 +18,9 @@ runs:
     line_color: "green"
     D: 1024
     K: 4
-
-  - data_manager:
+  
+  
+  - dm_config:
       dataset: "cifar-10"
       gaussian: false
       rank: 1
@@ -38,6 +39,6 @@ runs:
     K: 4
 
 
-plot_name: "rg45"
+plot_name: "ask=4rg45"
 x_label: "α"
 y_label: "Generalization error"

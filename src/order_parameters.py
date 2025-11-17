@@ -3,9 +3,10 @@ import numpy as np
 from torch import nn
 from itertools import product, combinations_with_replacement
 from src.autoencoder import AutoEncoder
-from src.data_managers import *
-from src.config import ExperimentConfig
+from src.data_manager import DataManager
+from src.config import ExperimentConfig, DataManagerConfig, RunConfig
 from src.integrals.integrals import Integral
+from src.utils import set_seed
 from scipy.integrate import solve_ivp
 
 def compute_order_parameters_from_weights(model: AutoEncoder, omega):
@@ -414,8 +415,6 @@ def solve_ODE(alpha, state, params):
         R1_analytical += R1Bulk
         T1_analytical += T1Bulk
 
-    print(f"Time: {time.time()}")
-
 
     dR1Bulk, dT1Bulk = None, None
     if bulk:
@@ -445,26 +444,26 @@ def solve_ODE(alpha, state, params):
     return packed_order_params
         
 
-def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config: ExperimentConfig):
+def solve_autoencoder(seed: int, config: RunConfig, low_rank: int, integral):
+    
+    set_seed(seed)
+    
+    dm_config: DataManagerConfig = config
+    
+    D = config.D
+    K = config.K
     
     # load the model
-    model = AutoEncoder(
-        input_size=D,
-        hidden_size=K,
-        layers=1,
-        g=g.torch_fn,
-        tied=False,
-        scale=False,
-        bias=True
-    )
+    model = AutoEncoder(config=config)
+
     print(f"low rank: {low_rank}")
 
     # setup the data manager
-    data_manager = DataManager(41, 120, dataset=dataset, rank=low_rank, D=D, noise=noise, gaussian=gaussian)
+    data_manager = DataManager(seed, config)
 
     # trainloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_trainloader()
     testloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_testloader()
-
+    
     psis = eigenvectors * np.sqrt(D)
     rhos = eigenvalues
     
@@ -513,8 +512,8 @@ def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config
         "Q1Bulk": Q1Bulk_analytical,
         "rhos": rhos,
         "Spikes": Spikes,
-        "integrals": integrals,
-        "lr": lr
+        "integrals": integral,
+        "lr": config.learning_rate
     }
     state = {
         "q": q_analytical,
@@ -556,7 +555,7 @@ def simulate(D, K, g, low_rank, dataset , noise, gaussian, lr, integrals, config
             R1_analytical += R1Bulk
             T1_analytical += T1Bulk
 
-        loss, _ = test_error_with_order_parameters(T0, T1_analytical, Q1_analytical, R1_analytical, omega, integrals)
+        loss, _ = test_error_with_order_parameters(T0, T1_analytical, Q1_analytical, R1_analytical, omega, integral)
 
             
         analytical_solutions_results["T0"].append(T0)

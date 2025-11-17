@@ -1,5 +1,5 @@
 import numpy as np
-from src.activation_functions.activation_function import ActivationFunction
+from src.activation_functions import ActivationFunction, activation_function_factory
 from src.integrals.integrals import Integral
 from scipy.special import hermitenorm, factorial, factorial2, erf
 
@@ -7,8 +7,9 @@ from numpy.polynomial.hermite_e import HermiteE, hermegauss
 import functools
 
 class HermiteWrapper():
-    def __init__(self, g: ActivationFunction):
-        self.g: ActivationFunction = g
+    def __init__(self, g: str):
+        
+        self.g: ActivationFunction = activation_function_factory(g)
         
     def I2(self, C):
         return HermiteSeries.I2(C, self.g, self.g)
@@ -67,7 +68,6 @@ class HermiteSeries(Integral):
     @staticmethod
     def I21(C, g: ActivationFunction, N=10) -> float:
         """ rho(<H1,g> + <H3, g>) """
-        
         std1, std2 = np.sqrt(np.diagonal(C))
         
         g = g.scale(std1)

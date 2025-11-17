@@ -44,6 +44,9 @@ class Erf(ActivationFunction):
     def numpy_fn(self, x):
         return erfscaled_numpy(x * self.stretch)
     
+    def __call__(self, x):
+        return self.torch_fn(x)
+    
     def derivative_numpy_fn(self, x):
         return self.stretch*np.exp(-0.5*(x*self.stretch)**2)*np.sqrt(2/np.pi)
 

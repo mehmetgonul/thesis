@@ -7,27 +7,28 @@ from typing import get_origin, get_args, Union, Type, Any, Dict
 
 @dataclass(frozen=True)
 class DataManagerConfig:
-    dataset: str # "wishart" | "cifar-10" | "fashion_mnist"
+    dataset: str # "synthetic" | "cifar-10" | "fashion_mnist"
     rank: int
     batch_size: int
     noise: float = 0.
     gaussian: bool = False
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class RunConfig:
-    data_manager: DataManagerConfig
+    dm_config: DataManagerConfig
     activation_function: str # "erf" | "relu" | "linear" | "gelu" | "exp"
     tied: bool
+    scale_online_training: bool 
     bias: bool
-    training_method: str # "analytical_integrals" | "hermite_integrals" | "sgd"
+    alpha: int
+    training_method: str # "analytical" | "hermite" | "online"
     learning_rate: float
-    step_count: int
-    N: Optional[int]
+    N: Optional[int] # The degree of approximation when hermite is used
     
     line_type: str # "dashed" | "solid"
     line_color: str # color of the lines
     
-    D: int # I/O dimension (if the dataset is synthetic this will be overriden)
+    D: int # input size - determined by the data set choice
     K: int # hidden state dimension
     
 

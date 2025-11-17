@@ -1,19 +1,22 @@
 import torch
+from src.config import RunConfig
 from torchvision import transforms, datasets
 import numpy as np
 from torch.utils.data import DataLoader, RandomSampler
 
 class DataManager:
     
-    def __init__(self, seed: int, alpha: int, dataset: str, rank: int, D: int, noise: float, gaussian: bool, online: bool = False):
+    def __init__(self, seed: int, config: RunConfig):
         self.seed = seed
-        self.alpha = alpha
-        self.dataset = dataset
-        self.rank = rank
-        self.D = D
-        self.noise = noise
-        self.gaussian = gaussian
-        self.online = online
+        self.config = config
+        self.dm_config = config.dm_config
+        self.alpha = config.alpha
+        self.dataset = self.dm_config.dataset
+        self.rank = self.dm_config.rank
+        self.D = config.D
+        self.noise = self.dm_config.noise
+        self.gaussian = self.dm_config.gaussian
+        self.online = (config.training_method == "online") # aligned with the config
     
     def _preprocess_data(self, dataset, mean: float = 0.5, std: float = 0.5):
         data_size = dataset.data.shape[0]
@@ -44,7 +47,7 @@ class DataManager:
                             download=True, 
                             transform=input_transforms)
         
-        elif self.dataset == "random":
+        elif self.dataset == "synthetic":
             
             eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
     
@@ -59,7 +62,7 @@ class DataManager:
         else: 
             raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")
         
-        if self.dataset != "random":
+        if self.dataset != "synthetic":
             trainset = self._preprocess_data(trainset)
         
         # this in principle only work with cifar and mnist
@@ -113,7 +116,7 @@ class DataManager:
                             download=True, 
                             transform=input_transforms)
         
-        elif self.dataset == "random":
+        elif self.dataset == "synthetic":
             
             eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
     
@@ -129,7 +132,7 @@ class DataManager:
             raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")
         
         
-        if self.dataset != "random":
+        if self.dataset != "synthetic":
             testset = self._preprocess_data(testset)
         
         omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(testset)

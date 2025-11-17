@@ -3,27 +3,28 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-
+from src.config import RunConfig
+from src.activation_functions.factory import activation_function_factory
 import numpy as np
 
 # TODO: ask about aligned initialization
 
 class AutoEncoder(nn.Module):
-    def __init__(self, input_size,  hidden_size, layers = 1, g = F.relu, tied = False, scale = True, bias = False, std = 0.1):
-        super(AutoEncoder, self).__init__()
-        self.input_size = input_size 
-        self.hidden_size = hidden_size
-        self.g = g 
-        self.tied = tied
-        self.scale = scale
-        self.layers = layers
+    def __init__(self, config: RunConfig):
+        super().__init__()
+        self.input_size = config.D 
+        self.hidden_size = config.K
+        self.g = activation_function_factory(config.activation_function)
+        self.tied = config.tied
+        self.scale = config.scale_online_training
+        self.bias = config.bias
 
-        self.encoder = nn.Linear(input_size, hidden_size, bias=bias)
-        nn.init.normal_(self.encoder.weight, mean=0.0, std=std)
+        self.encoder = nn.Linear(self.input_size, self.hidden_size, bias=self.bias)
+        nn.init.normal_(self.encoder.weight, mean=0.0, std=0.01)
             
         if (not self.tied):
-            self.decoder = nn.Linear(hidden_size, input_size, bias=bias)
-            nn.init.normal_(self.decoder.weight, mean=0.0, std=std)
+            self.decoder = nn.Linear(self.hidden_size, self.input_size, bias=self.bias)
+            nn.init.normal_(self.decoder.weight, mean=0.0, std=0.01)
         
     def forward(self, x):
         

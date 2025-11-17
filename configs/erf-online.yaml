@@ -1,7 +1,7 @@
 run_name: "online"
 
 runs:
-  - data_manager:
+  - dm_config:
       dataset: "cifar-10"
       gaussian: false
       rank: 1
@@ -11,6 +11,7 @@ runs:
     tied: false
     bias: false
     training_method: "sgd"
+    alpha: 1000
     learning_rate: 1.0
     step_count: 10
     N: null
