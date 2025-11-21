@@ -11,19 +11,19 @@ class HermiteWrapper():
         
         self.g: ActivationFunction = activation_function_factory(g)
         
-    def I2(self, C):
+    def I2(self, C, N=10):
         return HermiteSeries.I2(C, self.g, self.g)
     
-    def J2(self, C, N=30):
+    def J2(self, C, N=10):
         return HermiteSeries.J2(C, self.g, N)
 
-    def I21(self, C, N=30):
+    def I21(self, C, N=10):
         return HermiteSeries.I21(C, self.g, N)
 
-    def I22(self, C, N=30):
+    def I22(self, C, N=10):
         return HermiteSeries.I22(C, self.g, N)
 
-    def I3(self, C, N=30):
+    def I3(self, C, N=10):
         return HermiteSeries.I3(C, self.g, self.g, N)
 
 

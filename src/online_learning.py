@@ -29,7 +29,7 @@ class OnlineLearning:
     def _init_model(self):
         self.model = AutoEncoder(config=self.config)
         self.model.to(self.device)
-        self.optim = optim.SGD(self.model.parameters(), lr=self.lr)
+        self.optim = optim.SGD(self.model.parameters(), lr=self.lr/self.config.D)
         
         
     def _set_data(self, seed):
@@ -42,7 +42,7 @@ class OnlineLearning:
         
         reconstruction = self.model(input)
         
-        loss = nn.functional.mse_loss(input, reconstruction)
+        loss = nn.functional.mse_loss(input, reconstruction) * 0.5
         
         
         self.optim.zero_grad()

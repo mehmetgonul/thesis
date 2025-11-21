@@ -49,15 +49,29 @@ class DataManager:
         
         elif self.dataset == "synthetic":
             
-            eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
-    
-            A = torch.randn(self.rank, self.D)
-            c = torch.randn(10_000, self.rank) * eigenvalues.unsqueeze(0).repeat(10_000, 1)
+            # eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
+            v = []
+            lam = []
+            for i in range(self.rank):
+                lam.append(self.D * (i + 1))
+                temp = np.zeros(self.D)
+                temp[i] = 1
+                v.append(temp)
+            
+            v = np.array(v)
+            
+            cov = np.identity(self.D)
+            
+            for i in range(self.rank):
+                cov += lam[i] * (v.T[i] @ (v)[i])
 
-            # data model
-            xs = (c @ A) + (self.noise * torch.randn(10_000, self.D) )
-            ys = torch.randint(0, 10, (10_000,)) # Dummy labels
-            trainset = torch.utils.data.TensorDataset(xs, ys)
+            eigenvalues, eigenvectors = np.linalg.eigh(cov)
+            eigenvalues = np.maximum(eigenvalues, 0.0)
+            sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
+            print("------------------------------------------------")
+            print(cov)
+            print("------------------------------------------------")
+            return cov, sqrt_omega, eigenvalues, eigenvectors
 
         else: 
             raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")
@@ -118,15 +132,24 @@ class DataManager:
         
         elif self.dataset == "synthetic":
             
-            eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
-    
-            A = torch.randn(self.rank, self.D)
-            c = torch.randn(10_000, self.rank) * eigenvalues.unsqueeze(0).repeat(10_000, 1)
+            # eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
+            v = []
+            lam = []
+            for i in range(self.rank):
+                lam = self.D * (i + 1)
+                temp = np.zeros(self.D)
+                temp[i] = 1
+                v.append(temp)
+            
+            cov = np.identity(self.D)
+            
+            for i in range(self.rank):
+                cov += lam[i] * v[i] * (v.T)[i]
 
-            # data model
-            xs = (c @ A) + (self.noise * torch.randn(10_000, self.D) )
-            ys = torch.randint(0, 10, (10_000,)) # Dummy labels
-            testset = torch.utils.data.TensorDataset(xs, ys)
+            eigenvalues, eigenvectors = np.linalg.eigh(cov)
+            eigenvalues = np.maximum(eigenvalues, 0.0)
+            sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
+            return cov, sqrt_omega, eigenvalues, eigenvectors
 
         else: 
             raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")

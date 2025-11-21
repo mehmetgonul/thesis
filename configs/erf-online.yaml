@@ -11,14 +11,15 @@ runs:
     tied: false
     bias: false
     training_method: "sgd"
-    alpha: 1000
+    alpha: 300
     learning_rate: 1.0
     step_count: 10
+    scale_online_training: false
     N: null
     line_type: "solid"
     line_color: "green"
     D: 1024
-    K: 6
+    K: 4
 
 
 

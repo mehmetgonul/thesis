@@ -5,6 +5,7 @@ import numpy as np
 from src.integrals.integrals import Integral
 import functools
 
+
 def analytical_integral_factory(activation_function: str):
     if activation_function.lower() == "erf":
         return SigmoidAnalyticIntegral
@@ -68,7 +69,7 @@ class SigmoidAnalyticIntegral(Integral):
 
     @staticmethod
     def I21(C: np.ndarray) -> float:
-       
+        
         if C.shape[0] < 2 or C.shape[1] < 2:
             raise ValueError("Covariance matrix C must be at least 2x2 for I21.")
         
@@ -141,7 +142,14 @@ class ReLUAnalyticIntegral:
         C12 = C[0,1]
         C22 = C[1,1]
 
-        return C12/4 + C12*np.arcsin(C12/np.sqrt(C11*C22))/(2*np.pi) + np.sqrt(C11*C22 - C12*C12)/(2*np.pi)
+        Sqdet = C11 * C22 - C12 ** 2
+        Sqdet = math.sqrt(Sqdet)
+        
+        res = 2 * Sqdet
+        res += C12 * math.pi
+        res += math.atan(C12 / Sqdet) * 2 * C12
+        res /= 8 * math.pi
+        return res
 
     @staticmethod
     def J2(C: np.ndarray) -> float:

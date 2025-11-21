@@ -1,8 +1,10 @@
-run_name: "asK=4_rg45"
+run_name: "eulervsrk45K=4_rg45"
 
 runs:
+
+
   - dm_config:
-      dataset: "cifar-10"
+      dataset: "synthetic"
       gaussian: false
       rank: 1
       batch_size: 10000
@@ -10,33 +12,19 @@ runs:
     activation_function: "erf"
     tied: false
     bias: true
-    training_method: "hermite_integrals"
+    alpha: 1000
+    plot_label: "rk45"
+    training_method: "analytical_integral"
     learning_rate: 1.0
     step_count: 10
-    N: null
-    line_type: "solid"
-    line_color: "green"
-    D: 1024
-    K: 4
-  
-  
-  - dm_config:
-      dataset: "cifar-10"
-      gaussian: false
-      rank: 1
-      batch_size: 10000
-      noise: 0.0
-    activation_function: "erf"
-    tied: false
-    bias: true
-    training_method: "analytical_integrals"
-    learning_rate: 1.0
-    step_count: 10
+    ode_method: "rk45"
     N: null
     line_type: "solid"
     line_color: "blue"
     D: 1024
     K: 4
+  
+  
 
 
 plot_name: "ask=4rg45"

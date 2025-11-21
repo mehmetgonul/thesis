@@ -38,12 +38,6 @@ for run_config in config.runs:
 
     dataset = dm_config.dataset
     
-    if dataset == "cifar-10":
-        run_config.D = 1024
-    elif dataset == "fashion_mnist":
-        run_config.D = 784
-    else:
-        run_config.D = 1000
 
     K = run_config.K
     lr = run_config.learning_rate
@@ -51,15 +45,25 @@ for run_config in config.runs:
     activation_function = run_config.activation_function
     noise = dm_config.noise
     gaussian = dm_config.gaussian
+    
+    if dataset == "cifar-10":
+        run_config.D = 1024
+        low_rank = run_config.D
+    elif dataset == "fashion_mnist":
+        run_config.D = 784
+        low_rank = run_config.D
+    else:
+        run_config.D = 1000
+        low_rank = K
 
 
 
     # load the model
     model = AutoEncoder(config=run_config)
     
-    if run_config.training_method == "analytical_integrals":
+    if run_config.training_method == "analytical_integral":
         integral = analytical_integral_factory(run_config.activation_function)
-    elif run_config.training_method == "hermite_integrals":
+    elif run_config.training_method == "hermite_integral":
         integral = HermiteWrapper(run_config.activation_function)
     elif run_config.training_method == "sgd":
         print("The training with stochasitic gradient descent will be done. No integral is needed.")
@@ -72,15 +76,15 @@ for run_config in config.runs:
     s = time.time()
 
     if 'integral' in locals():
-        alpha, generalization_error = solve_autoencoder(SEED, run_config, K, integral)
+        alpha, generalization_error = solve_autoencoder(SEED, run_config, low_rank, integral)
         D = run_config.D
-        results.append({"method": run_config.training_method, "alpha": alpha, "ge": generalization_error, "D": D, "color": run_config.line_color, "style": run_config.line_type})
+        results.append({"label": run_config.plot_label, "alpha": alpha, "ge": generalization_error, "D": D, "color": run_config.line_color, "style": run_config.line_type})
         del integral
     else:
         D = run_config.D
         online_learning = OnlineLearning(run_config, device=DEVICE)
         alpha, res = online_learning.start_training()
-        results.append({"method": run_config.training_method, "alpha": alpha, "ge": res, "D": D, "color": run_config.line_color, "style": run_config.line_type})      
+        results.append({"method": run_config.plot_label, "alpha": alpha, "ge": res, "D": D, "color": run_config.line_color, "style": run_config.line_type})      
  
 
 for res in results:
@@ -91,7 +95,7 @@ for res in results:
         ge,
         color=res["color"],
         linestyle=res["style"],
-        label=res["method"],
+        label=res["label"],
     )
 diff_flag = False
 # Check if at any points the difference between the curves is bigger than 1e-3

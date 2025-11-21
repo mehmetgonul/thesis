@@ -10,7 +10,27 @@ runs:
     activation_function: "gelu"
     tied: false
     bias: false
-    training_method: "analytical_integrals"
+    training_method: "hermite_integral"
+    alpha: 1000
+    learning_rate: 1.0
+    step_count: 125
+    N: null
+    line_type: "solid"
+    line_color: "green"
+    D: 1024
+    K: 4
+  
+  - data_manager:
+      dataset: "cifar-10"
+      gaussian: false
+      rank: 1
+      batch_size: 10000
+      noise: 0.0
+    activation_function: "gelu"
+    tied: false
+    bias: false
+    training_method: "analytical_integral"
+    alpha: 1000
     learning_rate: 1.0
     step_count: 125
     N: null

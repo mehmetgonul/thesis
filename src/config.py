@@ -19,6 +19,7 @@ class RunConfig:
     activation_function: str # "erf" | "relu" | "linear" | "gelu" | "exp"
     tied: bool
     scale_online_training: bool 
+    plot_label: str 
     bias: bool
     alpha: int
     training_method: str # "analytical" | "hermite" | "online"
@@ -30,6 +31,9 @@ class RunConfig:
     
     D: int # input size - determined by the data set choice
     K: int # hidden state dimension
+    
+    
+    ode_method: str = "rk45" # "euler" | "rk45"
     
 
 @dataclass(frozen=True)

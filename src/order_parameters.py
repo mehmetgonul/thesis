@@ -16,11 +16,22 @@ def compute_order_parameters_from_weights(model: AutoEncoder, omega):
     else:
         V = model.decoder.weight.detach().cpu().numpy().T
     
+    # W = np.zeros((model.encoder.weight.data.shape[0], model.encoder.weight.data.shape[1]))
+    # V = np.zeros((model.decoder.weight.data.shape[1], model.decoder.weight.data.shape[0]))
+    
     D, _ = omega.shape
 
     T1 = V @ omega @ V.T/(D**2)
     Q1 = W @ omega @ W.T/D
     R1 = V @ omega @ W.T/(D**1.5)
+    
+    print("q1")
+    print(Q1)
+    print("t1")
+    print(T1)
+    print("R1")
+    print(R1)
+    
     
     T0 = V@V.T/D
     Q0 = W@W.T/D
@@ -35,6 +46,9 @@ def calculate_densities_from_weights(model: AutoEncoder, omega, psis, rhos):
         V = model.encoder.weight.detach().cpu().numpy()
     else:
         V = model.decoder.weight.detach().cpu().numpy().T
+    
+    # W = np.zeros((model.encoder.weight.data.shape[0], model.encoder.weight.data.shape[1]))
+    # V = np.zeros((model.decoder.weight.data.shape[1], model.decoder.weight.data.shape[0]))
     
     D, _ = omega.shape
     
@@ -59,8 +73,8 @@ def test_error_with_order_parameters(T0, T1, Q1, R1, omega, integral: Integral):
     D, _ = omega.shape
     K, _ = Q1.shape
     
-    C2Vec = np.zeros((K,2, 2))
-    C2Mat = np.zeros((K, K, 2, 2))
+    C2Vec = np.zeros((K, K, K))
+    C2Mat = np.zeros((K, K, K, K))
     
     for k in range(K):
         C2Vec[k, 0, 0] = T1[k, k]
@@ -290,7 +304,7 @@ def change_in_R1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
     return dr
 
     
-def change_in_TBulk(q, r, t, rhos, T0, Q1, R1, T1, T1_bulk, lr, K, D, integrals: Integral):
+def change_in_TBulk(Q1, T1_bulk, lr, K, integrals: Integral):
     
     def _computation(k, l):
         C2vec = np.zeros((K, 2, 2))
@@ -318,7 +332,7 @@ def change_in_TBulk(q, r, t, rhos, T0, Q1, R1, T1, T1_bulk, lr, K, D, integrals:
     return dT
 
 
-def change_in_RBulk(q, r, t, rhos, T0, Q1, R1, T1, R1_bulk, lr, K, D, integrals: Integral):
+def change_in_RBulk(Q1,R1_bulk, lr, K, integrals: Integral):
     
     def _computation(k, l):
         C2vec = np.zeros((K, 2, 2))
@@ -422,8 +436,8 @@ def solve_ODE(alpha, state, params):
         dq = change_in_Q1(q, r, t, Spikes, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
         dr = change_in_R1(q, r, t, Spikes, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
         
-        dR1Bulk = change_in_RBulk(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, R1Bulk, lr, K, D, integrals)
-        dT1Bulk = change_in_TBulk(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, T1Bulk, lr, K, D, integrals)
+        dR1Bulk = change_in_RBulk(Q1_analytical, T1_analytical,  lr, K, integrals)
+        dT1Bulk = change_in_TBulk(R1_analytical, T1_analytical,  lr, K, integrals)
     else:
         dt = change_in_T(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
         dq = change_in_Q1(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
@@ -442,9 +456,8 @@ def solve_ODE(alpha, state, params):
     }, sizes)
     
     return packed_order_params
-        
 
-def solve_autoencoder(seed: int, config: RunConfig, low_rank: int, integral):
+def rk45(seed: int, config: RunConfig, low_rank: int, integral):
     
     set_seed(seed)
     
@@ -461,8 +474,8 @@ def solve_autoencoder(seed: int, config: RunConfig, low_rank: int, integral):
     # setup the data manager
     data_manager = DataManager(seed, config)
 
-    # trainloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_trainloader()
-    testloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_testloader()
+    (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_trainloader()
+    # testloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_testloader()
     
     psis = eigenvectors * np.sqrt(D)
     rhos = eigenvalues
@@ -533,7 +546,7 @@ def solve_autoencoder(seed: int, config: RunConfig, low_rank: int, integral):
         y0=initial_state,
         method="RK45",
         rtol=1e-6,
-        atol=1e-9,
+        atol=1e-7,
         max_step=np.inf,
     )
     
@@ -565,7 +578,152 @@ def solve_autoencoder(seed: int, config: RunConfig, low_rank: int, integral):
         analytical_solutions_results["loss"].append(loss)
 
     print(f"len of steps {len(analytical_solutions_results['loss'])}")
+    
+    C = np.zeros((8,8))
+    C[:4, :4] = Q1_analytical
+    C[:4, 4:] = R1_analytical
+    C[4:, :4] = R1_analytical
+    C[4:, 4:] = T1_analytical
+    
+    print(np.all(np.linalg.eigvals(C)) > -1e-9) 
 
-    return sol.t, analytical_solutions_results["loss"]
+    return sol.t, analytical_solutions_results["loss"]    
+
+def euler(seed: int, config: RunConfig, low_rank: int, integral):
+    set_seed(seed)
+    
+    dm_config: DataManagerConfig = config
+    
+    D = config.D
+    K = config.K
+    
+    # load the model
+    model = AutoEncoder(config=config)
+
+    print(f"low rank: {low_rank}")
+
+    # setup the data manager
+    data_manager = DataManager(seed, config)
+
+    # trainloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_trainloader()
+    testloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_testloader()
+    
+    psis = eigenvectors * np.sqrt(D)
+    rhos = eigenvalues
+    
+    step = 0.
+    dstep = 1.0/D
+    
+    # training the analytical integrals (if activation function has any)
+    T1, Q1, R1, T0, Q0, R0 = compute_order_parameters_from_weights(model=model, omega=omega)
+
+    Spikes = rhos[-low_rank:]
+    Bulk = rhos[:-low_rank]
+
+    Q1bulk = np.zeros(Q1.shape)
+    R1bulk = np.zeros(R1.shape)
+    T1bulk = np.zeros(T1.shape)
+
+    q, r, t = calculate_densities_from_weights(model, omega, psis, rhos)
+    for k, l in product(range(K), range(K)):
+        Q1bulk[k,l] = np.sum(Bulk*q[k,l,:-low_rank]) / D
+        R1bulk[k,l] = np.sum(Bulk*r[k,l,:-low_rank]) / D
+        T1bulk[k,l] = np.sum(Bulk*t[k,l,:-low_rank]) / D
+
+    q_analytical, r_analytical, t_analytical = (q.T[-low_rank:]).T, (r.T[-low_rank:]).T , (t.T[-low_rank:]).T
+    Q1Bulk_analytical, R1Bulk_analytical, T1Bulk_analytical = Q1bulk, R1bulk, T1bulk
+    T0_analytical = T0
+    
+    analytical_solutions_results = {
+        "T": [],
+        "T0": [],
+        "Q1": [],
+        "R1": [],
+        "loss": []
+    }
+
+    Q1_analytical = np.zeros((K, K))
+    R1_analytical = np.zeros((K, K))
+    T1_analytical = np.zeros((K, K))
+
+    lr = config.learning_rate
+
+    while step < config.alpha:
+        
+        for k, l in product(range(K), range(K)):
+            Q1_analytical[k,l] = np.sum(Spikes*q_analytical[k,l]) / D
+            R1_analytical[k,l] = np.sum(Spikes*r_analytical[k,l]) / D
+            T1_analytical[k,l] = np.sum(Spikes*t_analytical[k,l]) / D
+            
+            # in a real dataset everything is treated as a spike
+            if low_rank == D:
+                Q1_analytical[k,l] += Q1Bulk_analytical[k,l]
+                R1_analytical[k,l] += R1Bulk_analytical[k,l]
+                T1_analytical[k,l] += T1Bulk_analytical[k,l]
+        
+        if low_rank == D: # means a real data set is being used        
+            dt = change_in_T(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            dq = change_in_Q1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            dr = change_in_R1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            dt0 = change_in_T0(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+        
+        # NOTE: in the prior work at each step new order parameters are computed.
+        # NOTE: as a change, we evolve them independently
+        
+        if low_rank == D:
+        
+            dt = change_in_T(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            dq = change_in_Q1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            dr = change_in_R1(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            dt0 = change_in_T0(q_analytical, r_analytical, t_analytical, rhos, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+
+        elif low_rank != D: 
+                    
+            dt = change_in_T(q_analytical, r_analytical, t_analytical, Spikes, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            dq = change_in_Q1(q_analytical, r_analytical, t_analytical, Spikes, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            dr = change_in_R1(q_analytical, r_analytical, t_analytical, Spikes, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            dt0 = change_in_T0(q_analytical, r_analytical, t_analytical, Spikes, T0_analytical, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integral)
+            
+            # since in the synthetic dataset there are bulks, we also have to evolve them
+            dR1Bulk_analytical = change_in_RBulk(Q1_analytical, R1Bulk_analytical, lr, K, integral)
+            dT1Bulk_analytical = change_in_TBulk(Q1_analytical, T1Bulk_analytical, lr, K, integral)
+                
+        t_analytical += dt * dstep
+        q_analytical += dq * dstep
+        r_analytical += dr * dstep
+        T0_analytical += dt0 * dstep 
+        
+        step += dstep
+        
+        if low_rank != D:
+            R1Bulk_analytical += dR1Bulk_analytical * dstep
+            T1Bulk_analytical += dT1Bulk_analytical * dstep
+            
+        
+        loss, _ = test_error_with_order_parameters(T0_analytical, T1_analytical, Q1_analytical, R1_analytical, omega, integral)
+
+        analytical_solutions_results["T0"].append(T0_analytical)
+        analytical_solutions_results["T"].append(T1_analytical)
+        analytical_solutions_results["Q1"].append(Q1_analytical)
+        analytical_solutions_results["R1"].append(R1_analytical)
+        analytical_solutions_results["loss"].append(loss)
+        
+        
+    steps = np.arange(0, step, dstep)
+    return steps, analytical_solutions_results["loss"]
+        
+
+
+
+def solve_autoencoder(seed: int, config: RunConfig, low_rank: int, integral):
+    
+    if config.ode_method == "rk45":
+        return rk45(seed, config, low_rank, integral)
+    
+    elif config.ode_method == "euler":
+        return euler(seed, config, low_rank, integral)
+    
+    else:
+        return ValueError(f"ode_method in config is invalid: {config.ode_method}")
     
     

@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from src.config import RunConfig
-from src.activation_functions.factory import activation_function_factory
+from src.activation_functions.common import activation_function_factory
 import numpy as np
 
 # TODO: ask about aligned initialization
@@ -20,11 +20,11 @@ class AutoEncoder(nn.Module):
         self.bias = config.bias
 
         self.encoder = nn.Linear(self.input_size, self.hidden_size, bias=self.bias)
-        nn.init.normal_(self.encoder.weight, mean=0.0, std=0.01)
+        nn.init.normal_(self.encoder.weight, mean=0.0, std=0.1)
             
         if (not self.tied):
             self.decoder = nn.Linear(self.hidden_size, self.input_size, bias=self.bias)
-            nn.init.normal_(self.decoder.weight, mean=0.0, std=0.01)
+            nn.init.normal_(self.decoder.weight, mean=0.0, std=0.1)
         
     def forward(self, x):
         
