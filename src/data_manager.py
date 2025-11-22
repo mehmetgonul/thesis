@@ -12,7 +12,7 @@ class DataManager:
         self.dm_config = config.dm_config
         self.alpha = config.alpha
         self.dataset = self.dm_config.dataset
-        self.rank = self.dm_config.rank
+        self.rank = self.config.K
         self.D = config.D
         self.noise = self.dm_config.noise
         self.gaussian = self.dm_config.gaussian
@@ -60,28 +60,31 @@ class DataManager:
             
             v = np.array(v)
             
-            cov = np.identity(self.D)
+            cov = np.eye(self.D)
             
             for i in range(self.rank):
-                cov += lam[i] * (v.T[i] @ (v)[i])
-
-            eigenvalues, eigenvectors = np.linalg.eigh(cov)
-            eigenvalues = np.maximum(eigenvalues, 0.0)
-            sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
-            print("------------------------------------------------")
-            print(cov)
-            print("------------------------------------------------")
-            return cov, sqrt_omega, eigenvalues, eigenvectors
+                cov += lam[i] * np.outer(v[i], v[i])
+                
+            trainset = torch.utils.data.TensorDataset(torch.empty(0, self.D), torch.empty(0, dtype=torch.long))
 
         else: 
             raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")
         
         if self.dataset != "synthetic":
             trainset = self._preprocess_data(trainset)
+            omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(trainset)
         
-        # this in principle only work with cifar and mnist
-        omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(trainset)
-        if self.gaussian:
+        else:
+            omega = cov
+            eigenvalues, eigenvectors = np.linalg.eigh(cov)
+            eigenvalues = np.maximum(eigenvalues, 0.0)
+            sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
+
+            omega, sqrt_omega, eigenvalues, eigenvectors
+        
+        
+        
+        if self.gaussian and self.dataset != "synthetic":
             xs = np.random.randn(len(trainset), trainset[0][0].numel()) @ sqrt_omega
             xs = torch.from_numpy(xs).float()
             ys = trainset.tensors[1]
@@ -136,7 +139,7 @@ class DataManager:
             v = []
             lam = []
             for i in range(self.rank):
-                lam = self.D * (i + 1)
+                lam.append(self.D * (i + 1))
                 temp = np.zeros(self.D)
                 temp[i] = 1
                 v.append(temp)
@@ -146,20 +149,21 @@ class DataManager:
             for i in range(self.rank):
                 cov += lam[i] * v[i] * (v.T)[i]
 
-            eigenvalues, eigenvectors = np.linalg.eigh(cov)
-            eigenvalues = np.maximum(eigenvalues, 0.0)
-            sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
-            return cov, sqrt_omega, eigenvalues, eigenvectors
-
         else: 
             raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")
         
         
         if self.dataset != "synthetic":
             testset = self._preprocess_data(testset)
+            omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(testset)
+            
+        else:
+            eigenvalues, eigenvectors = np.linalg.eigh(cov)
+            eigenvalues = np.maximum(eigenvalues, 0.0)
+            sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
+            omega, sqrt_omega, eigenvalues, eigenvectors
         
-        omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(testset)
-        if self.gaussian:
+        if self.gaussian and self.dataset != "synthetic":
             xs = np.random.randn(len(testset), testset[0][0].numel()) @ sqrt_omega
             xs = torch.from_numpy(xs).float()
             ys = testset.tensors[1]

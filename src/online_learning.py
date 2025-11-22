@@ -4,13 +4,14 @@ from src.utils import set_seed
 from src.data_manager import DataManager
 
 import numpy as np
+import math
 
 import torch
 from torch import optim
 from torch import nn
 
 
-SEEDS = [41, 42, 43, 44]
+SEEDS = [500]
 
 class OnlineLearning:
 
@@ -23,19 +24,28 @@ class OnlineLearning:
         self.model = None
         self.optim = None
         self.dm: DataManager = None # to be set in the run loop for different seeds
+        self.data_stats = None
         self.trainloader = None
         self.testloader = None
 
     def _init_model(self):
         self.model = AutoEncoder(config=self.config)
         self.model.to(self.device)
-        self.optim = optim.SGD(self.model.parameters(), lr=self.lr/self.config.D)
-        
+        # self.optim = optim.SGD(self.model.parameters(), lr=self.lr)
+        self.optim = optim.SGD(
+            [
+                {"params": self.model.encoder.parameters(),
+                 "lr": self.lr / self.config.D},  # η_W
+                {"params": self.model.decoder.parameters(),
+                 "lr": self.lr},                  # η_V
+            ]
+        )
         
     def _set_data(self, seed):
         self.dm = DataManager(seed, self.config)
         self.trainloader, _ = self.dm.get_trainloader()
-        self.testloader, _ = self.dm.get_testloader()
+        self.testloader, self.data_stats = self.dm.get_testloader()
+        # import code; code.interact(local=locals())
     
     def _train_step(self, input):
         self.model.train()
@@ -61,7 +71,7 @@ class OnlineLearning:
             for test_input, _ in self.testloader:
                 test_input = test_input.to(self.device)
                 test_reconstruction = self.model(test_input)
-                loss = nn.functional.mse_loss(test_input, test_reconstruction)
+                loss = nn.functional.mse_loss(test_input, test_reconstruction) * 0.5
                 
                 avg_test_loss += loss
                 
@@ -109,8 +119,8 @@ class OnlineLearning:
             
             set_seed(seed)
 
-            self._init_model()
             self._set_data(seed)
+            self._init_model()
             
             return self._train()
 

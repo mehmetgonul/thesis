@@ -1,5 +1,6 @@
 import math
 import numpy as np
+import torch
 from torch import nn
 from itertools import product, combinations_with_replacement
 from src.autoencoder import AutoEncoder
@@ -188,6 +189,7 @@ def change_in_Q1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
         
         A = 0
         for a in range(K):
+            Aa = 0
             if a == k:
                 continue
             det_ka = Q1[k, k] * Q1[a, a] - (Q1[k, a] ** 2)
@@ -214,14 +216,17 @@ def change_in_Q1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
 
         return (A + B + C) * rhos
 
-    indicies = np.triu_indices(K)
-    dkl = [ _computation(k, l) for k, l in zip(*indicies) ]
-    dlk = [ _computation(l, k) for k, l in zip(*indicies) ]
+    dkl = [ _computation(k, l) for k, l in combinations_with_replacement(range(K), 2)]
+    dlk = [ _computation(l, k) for k, l in combinations_with_replacement(range(K), 2)]
+    
+    indicies = np.triu_indices_from(T0)
 
     dkl = lr * np.concatenate(dkl).reshape(len(indicies[0]), q.shape[-1])
     dlk = lr * np.concatenate(dlk).reshape(len(indicies[0]), q.shape[-1])
 
-    dq = np.zeros_like(q)
+    dq = np.zeros(t.shape)
+    # import code; code.interact(local=locals())
+    
     dq[indicies] = dkl + dlk
     for k in range(K):
         for l in range(k):
@@ -234,13 +239,14 @@ def change_in_Q1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
 def change_in_R1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
     
     def _computation_dv(k, l):
+        dd = 0
         C2 = np.zeros((2, 2))
         C2[0, 0] = Q1[k, k]
         C2[0, 1] = Q1[k, k]
         C2[1, 0] = Q1[k, k]
         C2[1, 1] = Q1[k, k]
 
-        dd = integrals.J2(C2) / Q1[k, k] * q[k, l] * rhos / D
+        dd += integrals.J2(C2) / Q1[k, k] * q[k, l] * rhos / D
 
         C2 = np.zeros((2, 2))
         for a in range(K):
@@ -267,6 +273,7 @@ def change_in_R1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
         # ----- A term -----
         A = 0
         for a in range(K):
+            Aa = 0
             if a == l:
                 continue
             det_la = Q1[l, l] * Q1[a, a] - (Q1[l, a] ** 2)
@@ -294,16 +301,20 @@ def change_in_R1(q, r, t, rhos, T0, Q1, R1, T1, lr, K, D, integrals: Integral):
 
         return (A + B + C) * rhos / D
 
-    res_w = np.zeros_like(r)
-    res_v = np.zeros_like(r)
-    for k, l in product(range(K), range(K)):
-        res_v[k, l] = _computation_dv(k, l)
-        res_w[k, l] = _computation_dw(k, l)
+    res_w = np.zeros(r.shape)
+    res_v = np.zeros(r.shape)
+    for k in range(K):
+        for l in range(K):
+            res_v[k, l] = _computation_dv(k, l)
+            res_w[k, l] = _computation_dw(k, l)
 
-    dr = lr * (res_w + res_v)
+    resw = lr * np.concatenate( res_w ).reshape(r.shape)
+    resv = lr * np.concatenate( res_v ).reshape(r.shape)
+
+    dr = (resw + resv)
     return dr
 
-    
+# TODO: take a look at bulks they are not correct for now. Not a problem in a real dataset
 def change_in_TBulk(Q1, T1_bulk, lr, K, integrals: Integral):
     
     def _computation(k, l):
@@ -313,8 +324,9 @@ def change_in_TBulk(Q1, T1_bulk, lr, K, integrals: Integral):
             C2vec[a, 0, 1] = Q1[k, a]
             C2vec[a, 1, 1] = Q1[a, a]
         dd = 0.0
-        for a in range(K):
-            dd -= integrals.I2(C2vec[a]) * T1_bulk[a, l]
+        
+        # dd = - sum([integrals.I2(C2vec[a]) * T1_bulk[a,l] for a in])
+        
         return dd
     
     indices = np.triu_indices(K)
@@ -436,14 +448,16 @@ def solve_ODE(alpha, state, params):
         dq = change_in_Q1(q, r, t, Spikes, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
         dr = change_in_R1(q, r, t, Spikes, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
         
-        dR1Bulk = change_in_RBulk(Q1_analytical, T1_analytical,  lr, K, integrals)
-        dT1Bulk = change_in_TBulk(R1_analytical, T1_analytical,  lr, K, integrals)
+        dT0 = change_in_T0(q, r, t, Spikes, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        
+        dR1Bulk = change_in_RBulk(Q1_analytical, R1Bulk,  lr, K, integrals)
+        dT1Bulk = change_in_TBulk(Q1_analytical, T1Bulk,  lr, K, integrals)
     else:
         dt = change_in_T(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
         dq = change_in_Q1(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
         dr = change_in_R1(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
             
-    dT0 = change_in_T0(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
+        dT0 = change_in_T0(q, r, t, rhos, T0, Q1_analytical, R1_analytical, T1_analytical, lr, K, D, integrals)
     
     
     packed_order_params = pack_order_params({
@@ -474,15 +488,15 @@ def rk45(seed: int, config: RunConfig, low_rank: int, integral):
     # setup the data manager
     data_manager = DataManager(seed, config)
 
-    (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_trainloader()
+    _, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_trainloader()
     # testloader, (omega, sqrt_omega, eigenvalues, eigenvectors) = data_manager.get_testloader()
     
     psis = eigenvectors * np.sqrt(D)
+    
     rhos = eigenvalues
     
-    step = 0.
-    dstep = 1.0/D
-    
+    print("here")
+
     # training the analytical integrals (if activation function has any)
     T1, Q1, R1, T0, Q0, R0 = compute_order_parameters_from_weights(model=model, omega=omega)
 
@@ -516,7 +530,7 @@ def rk45(seed: int, config: RunConfig, low_rank: int, integral):
     R1_analytical = np.zeros((K, K))
     T1_analytical = np.zeros((K, K))
     
-    max_step = 1000
+    max_step = config.alpha
     
 
     sizes = set_size_dict(D, K, low_rank)
@@ -547,7 +561,7 @@ def rk45(seed: int, config: RunConfig, low_rank: int, integral):
         method="RK45",
         rtol=1e-6,
         atol=1e-7,
-        max_step=np.inf,
+        max_step=1, # for numerical precision cannot be infinite
     )
     
     analytical_solutions_results = {"T": [], "T0": [], "Q1": [], "R1": [], "loss": []}
@@ -568,7 +582,13 @@ def rk45(seed: int, config: RunConfig, low_rank: int, integral):
             R1_analytical += R1Bulk
             T1_analytical += T1Bulk
 
-        loss, _ = test_error_with_order_parameters(T0, T1_analytical, Q1_analytical, R1_analytical, omega, integral)
+        loss, (term0, termJ2, termI2) = test_error_with_order_parameters(T0, T1_analytical, Q1_analytical, R1_analytical, omega, integral)
+        print("term0: ")
+        print(term0)
+        print("termJ2: ")
+        print(termJ2)
+        print("termI2: ")
+        print(termI2)
 
             
         analytical_solutions_results["T0"].append(T0)
@@ -585,7 +605,10 @@ def rk45(seed: int, config: RunConfig, low_rank: int, integral):
     C[4:, :4] = R1_analytical
     C[4:, 4:] = T1_analytical
     
-    print(np.all(np.linalg.eigvals(C)) > -1e-9) 
+    
+    v = (np.linalg.eigvals(C)).min()
+    print(f"min: {v}")
+    
 
     return sol.t, analytical_solutions_results["loss"]    
 

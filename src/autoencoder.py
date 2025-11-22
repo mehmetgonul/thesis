@@ -19,6 +19,8 @@ class AutoEncoder(nn.Module):
         self.scale = config.scale_online_training
         self.bias = config.bias
 
+        print(f"tied: {self.tied}, scale: {self.scale}, bias: {self.bias}")
+
         self.encoder = nn.Linear(self.input_size, self.hidden_size, bias=self.bias)
         nn.init.normal_(self.encoder.weight, mean=0.0, std=0.1)
             

@@ -19,9 +19,9 @@ import random
 
 config: ExperimentConfig = parse_config(sys.argv[1])
 
-SEED = 41
+SEED = 1
 
-set_seed(41)
+set_seed(SEED)
 
 
 if torch.cuda.is_available():
@@ -84,8 +84,9 @@ for run_config in config.runs:
         D = run_config.D
         online_learning = OnlineLearning(run_config, device=DEVICE)
         alpha, res = online_learning.start_training()
-        results.append({"method": run_config.plot_label, "alpha": alpha, "ge": res, "D": D, "color": run_config.line_color, "style": run_config.line_type})      
- 
+        results.append({"label": run_config.plot_label, "alpha": alpha, "ge": res, "D": D, "color": run_config.line_color, "style": run_config.line_type})      
+
+
 
 for res in results:
     ge = res["ge"]
@@ -124,5 +125,5 @@ safe_title = config.plot_name.replace(" ", "_").lower()
 safe_x = config.x_label.replace(" ", "_").lower()
 safe_y = config.y_label.replace(" ", "_").lower()
 
-plt.savefig(f"{safe_title}_{safe_x}_{safe_y}.png")
+plt.savefig(f"{safe_title}_{safe_x}_{safe_y}_{time.time()}.png")
 plt.close()
