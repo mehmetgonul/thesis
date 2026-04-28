@@ -17,12 +17,11 @@ class AutoEncoder(nn.Module):
         self.hidden_size = config.K
         self.g = activation_function_factory(config.activation_function)
         self.tied = config.tied
-        self.scale = config.scale_online
         self.bias = config.bias
         
         self.scale_factor = 1 / math.sqrt(self.input_size)
 
-        print(f"tied: {self.tied}, scale: {self.scale}, bias: {self.bias}")
+        print(f"tied: {self.tied}, bias: {self.bias}")
 
         self.encoder = nn.Linear(self.input_size, self.hidden_size, bias=self.bias)
         # TODO: try xavier
@@ -41,18 +40,11 @@ class AutoEncoder(nn.Module):
             else:
                 nn.init.normal_(self.decoder.weight, mean=0.0, std=config.init_std)
         
+    def encode(self, x):
+        return self.g(self.encoder(x) * self.scale_factor)
+    
     def forward(self, x):
-        
-        # encoder
-        
-        if self.scale:
-            # normalize by input dimension
-            x = self.g(self.encoder(x) * self.scale_factor)
-        else:
-            x = self.g(self.encoder(x))
-            
-            
-        # decoder
+        x = self.encode(x)
         
         if self.tied:
             x = F.linear(x, self.encoder.weight.t())

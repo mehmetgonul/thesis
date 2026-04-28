@@ -10,12 +10,11 @@ def _to_dict(value):
     return asdict(value) if is_dataclass(value) else value
 
 
-def make_hash(run_config=None, probe_config=None, seed=None):
+def make_hash(run_config=None, seed=None):
     payload = {
         k: v
         for k, v in {
             "run_config": _to_dict(run_config) if run_config is not None else None,
-            "probe_config": _to_dict(probe_config) if probe_config is not None else None,
             "seed": int(seed) if seed is not None else None,
         }.items()
         if v is not None
@@ -29,7 +28,7 @@ def make_hash(run_config=None, probe_config=None, seed=None):
 
 
 def check_hash(run_config=None, probe_config=None, seed=None):
-    run_hash = make_hash(run_config, probe_config, seed)
+    run_hash = make_hash(run_config=run_config, seed=seed)
     base_name = f"seed{seed}_{run_hash}" if seed is not None else run_hash
     checkpoint = Path("artifacts") / run_hash / f"{base_name}.pt"
     results = Path("artifacts") / run_hash / f"{base_name}.jsonl"

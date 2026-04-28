@@ -97,111 +97,97 @@ def main() -> None:
     else:
         device = torch.device(args.device)
 
-    experiment_config = parse_config(args.config)
+    run_config = parse_config(args.config)
 
-    for run_config in experiment_config.runs:
-        dataset = run_config.dm_config.dataset
-        if dataset == "cifar-10":
-            run_config.D = 1024
-        elif dataset == "fashion_mnist":
-            run_config.D = 784
-        elif dataset == "synthetic":
-            run_config.D = 1000
-        else:
-            raise ValueError(f"Unknown dataset: {dataset}")
+    run_hash = make_hash(run_config=run_config)
+    integral = analytical_integral_factory(run_config.activation_function)
 
-        run_hash = make_hash(run_config=run_config)
-        integral = analytical_integral_factory(run_config.activation_function)
+    for seed in SEEDS:
+        out_dir = args.runs_dir / run_hash / "autoencoder" / f"seed_{seed}"
+        model_path = out_dir / "model.pt"
+        loss_path = out_dir / "loss.jsonl"
 
-        for seed in args.seeds:
-            for sampling_strategy in args.sampling_strategies:
-                strategy_name = str(sampling_strategy).replace("/", "_")
-                out_dir = args.runs_dir / run_hash / "autoencoder" / f"seed_{seed}" / strategy_name
-                model_path = out_dir / "model.pt"
-                loss_path = out_dir / "loss.jsonl"
+        if not args.overwrite and model_path.exists() and loss_path.exists():
+            print(f"skip: {out_dir}")
+            continue
 
-                if not args.overwrite and model_path.exists() and loss_path.exists():
-                    print(f"skip: {out_dir}")
-                    continue
+        out_dir.mkdir(parents=True, exist_ok=True)
+        if loss_path.exists():
+            loss_path.unlink()
+        if model_path.exists():
+            model_path.unlink()
 
-                out_dir.mkdir(parents=True, exist_ok=True)
-                if loss_path.exists():
-                    loss_path.unlink()
-                if model_path.exists():
-                    model_path.unlink()
+        set_seed(seed)
 
-                set_seed(seed)
+        dm = DataManager(seed, run_config)
 
+        trainloader, (omega, _, _, _) = dm.get_trainloader()
 
-                dm = DataManager(seed, run_config)
+        model = AutoEncoder(config=run_config).to(device)
 
-                trainloader, (omega, _, _, _) = dm.get_trainloader()
+        params = [{"params": model.encoder.weight, "lr": run_config.learning_rate / run_config.D}]
+        if run_config.bias and model.encoder.bias is not None:
+            params.append({"params": model.encoder.bias, "lr": run_config.learning_rate})
+        if not run_config.tied:
+            params.append({"params": model.decoder.parameters(), "lr": run_config.learning_rate})
 
-                model = AutoEncoder(config=run_config).to(device)
+        optimizer = optim.SGD(params)
+        train_iter = iter(trainloader)
+        alpha = 0.0
+        step = 0
 
-                params = [{"params": model.encoder.weight, "lr": run_config.learning_rate / run_config.D}]
-                if run_config.bias and model.encoder.bias is not None:
-                    params.append({"params": model.encoder.bias, "lr": run_config.learning_rate})
-                if not run_config.tied:
-                    params.append({"params": model.decoder.parameters(), "lr": run_config.learning_rate})
+        with loss_path.open("w", encoding="utf-8") as f:
+            while alpha < run_config.alpha:
+                try:
+                    x, _ = next(train_iter)
+                except StopIteration:
+                    train_iter = iter(trainloader)
+                    x, _ = next(train_iter)
 
-                optimizer = optim.SGD(params)
-                train_iter = iter(trainloader)
-                alpha = 0.0
-                step = 0
+                x = x.to(device)
 
-                with loss_path.open("w", encoding="utf-8") as f:
-                    while alpha < run_config.alpha:
-                        try:
-                            x, _ = next(train_iter)
-                        except StopIteration:
-                            train_iter = iter(trainloader)
-                            x, _ = next(train_iter)
+                model.train()
+                reconstruction = model(x)
+                train_loss = 0.5 * nn.functional.mse_loss(reconstruction, x)
 
-                        x = x.to(device)
+                optimizer.zero_grad()
+                train_loss.backward()
+                optimizer.step()
 
-                        model.train()
-                        reconstruction = model(x)
-                        train_loss = 0.5 * nn.functional.mse_loss(reconstruction, x)
+                model.eval()
+                with torch.no_grad():
+                    # also order parameters are used for a more robust result
+                    T1, Q1, R1, T0, Q0, R0 = compute_order_parameters_from_weights(
+                        model=model,
+                        omega=omega,
+                    )
+                    ge, _ = test_error_with_order_parameters(
+                        T0,
+                        T1,
+                        Q1,
+                        R1,
+                        omega,
+                        integral,
+                    )
 
-                        optimizer.zero_grad()
-                        train_loss.backward()
-                        optimizer.step()
+                alpha += 1.0 / run_config.D
+                row = {
+                    "step": step,
+                    "alpha": alpha,
+                    "loss": float(train_loss.detach().cpu()),
+                    "generalization_error": float(ge),
+                }
+                f.write(json.dumps(row) + "\n")
 
-                        model.eval()
-                        with torch.no_grad():
-                            # also order parameters are used for a more robust result
-                            T1, Q1, R1, T0, Q0, R0 = compute_order_parameters_from_weights(
-                                model=model,
-                                omega=omega,
-                            )
-                            ge, _ = test_error_with_order_parameters(
-                                T0,
-                                T1,
-                                Q1,
-                                R1,
-                                omega,
-                                integral,
-                            )
+                print(
+                    f"seed={seed} "
+                    f"step={step} alpha={alpha:.6f} "
+                    f"loss={row['loss']:.6g} ge={row['generalization_error']:.6g}"
+                )
+                step += 1
 
-                        alpha += 1.0 / run_config.D
-                        row = {
-                            "step": step,
-                            "alpha": alpha,
-                            "loss": float(train_loss.detach().cpu()),
-                            "generalization_error": float(ge),
-                        }
-                        f.write(json.dumps(row) + "\n")
-
-                        print(
-                            f"seed={seed} sampling={sampling_strategy} "
-                            f"step={step} alpha={alpha:.6f} "
-                            f"loss={row['loss']:.6g} ge={row['generalization_error']:.6g}"
-                        )
-                        step += 1
-
-                torch.save(model.state_dict(), model_path)
-                print(f"saved: {model_path}")
+        torch.save(model.state_dict(), model_path)
+        print(f"saved: {model_path}")
 
 
 if __name__ == "__main__":

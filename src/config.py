@@ -1,9 +1,9 @@
-from dataclasses import dataclass, field
-from typing import Optional, List
+from dataclasses import MISSING, dataclass
+from typing import Optional
 import yaml
 from pathlib import Path
-from dataclasses import fields, is_dataclass, fields
-from typing import get_origin, get_args, Union, Type, Any, Dict
+from dataclasses import fields, is_dataclass
+from typing import get_origin, get_args, Union, Any
 
 
 @dataclass(frozen=False)
@@ -12,14 +12,13 @@ class RunConfig:
     activation_function: str # "erf" | "relu" | "linear" | "gelu" | "exp"
     tied: bool
     bias: bool
-    init_uniform: bool # if this than init_std is not important is initialization would be uniform
-    init_std: float
     alpha: int
     learning_rate: float
-    
-    N: Optional[int] # The degree of approximation when hermite is used
     D: int # input size - determined by the data set choice
     K: int # hidden state dimension
+    init_uniform: bool = False # if this than init_std is not important is initialization would be uniform
+    init_std: float = 0.01
+    N: Optional[int] = None # The degree of approximation when hermite is used
     
     
     
@@ -52,6 +51,9 @@ def _build(cls, payload: Any):
     for f in fields(cls):
         raw = payload.get(f.name)
         if raw is None:
+            if f.default is not MISSING:
+                kwargs[f.name] = f.default
+                continue
             kwargs[f.name] = None
             continue
 
@@ -75,7 +77,7 @@ def parse_config(src: Union[str, Path, dict]) -> RunConfig:
     Accepts
       • a `str` / `Path` pointing to a YAML/JSON file, **or**
       • an in memory `dict`.
-    Returns a fully populated `ExperimentConfig`.
+    Returns a fully populated `RunConfig`.
     """
     if isinstance(src, (str, Path)):
         with open(src, "r", encoding="utf-8") as fh:
@@ -84,5 +86,11 @@ def parse_config(src: Union[str, Path, dict]) -> RunConfig:
         cfg_dict = src
     else:
         raise TypeError(f"parse_config() needs str, Path or dict - got {type(src).__name__}")
+
+    if "runs" in cfg_dict:
+        cfg_dict = cfg_dict["runs"][0]
+    dm_config = cfg_dict.get("dm_config") or cfg_dict.get("data_manager")
+    if dm_config is not None and "dataset" not in cfg_dict:
+        cfg_dict["dataset"] = dm_config["dataset"]
 
     return _build(RunConfig, cfg_dict)
