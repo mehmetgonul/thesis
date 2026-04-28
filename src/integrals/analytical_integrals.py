@@ -15,8 +15,6 @@ def analytical_integral_factory(activation_function: str):
         return LinearAnalyticIntegral
     elif activation_function.lower() == "gelu":
         return GeLUAnalyticalIntegral.GeLUAnalyticalIntegral
-    elif activation_function.lower() == "exponential" or activation_function.lower() == "exp":
-        return ExponantialAnalyticalIntegral.ExponantialAnalyticalIntegral
     else:
         raise ValueError(f"Unknown activation function: {activation_function}")
 
@@ -26,8 +24,8 @@ class SigmoidAnalyticIntegral(Integral):
         # sanity check
         if C.shape[0] < 2 or C.shape[1] < 2:
             raise ValueError("Covariance matrix C must be at least 2x2 for I2.")
-        res = C[0,1] / (math.sqrt(1 + C[0,0]) * math.sqrt(1 + C[1,1]))
-        # res = float(np.clip(res, -1.0 + 1e-9, 1.0 - 1e-9))
+        res = C[0,1] / (math.sqrt(max(1 + C[0,0], 0.0)) * math.sqrt(max(1 + C[1,1], 0.0)))
+        res = float(np.clip(res, -1.0 + 1e-9, 1.0 - 1e-9))
         return (2.0 * np.arcsin(res)) / np.pi
     
     @staticmethod
@@ -41,7 +39,8 @@ class SigmoidAnalyticIntegral(Integral):
 
         denom = 1.0 + c22
         # print(f"c22 (J2): {c22}")
-        val = math.sqrt(2.0 / math.pi) * (c12 / math.sqrt(denom))
+        safe_denom = max(denom, 1e-9)
+        val = math.sqrt(2.0 / (math.pi * safe_denom)) * (c12)
         
         return val
     
@@ -58,13 +57,16 @@ class SigmoidAnalyticIntegral(Integral):
         c23 = C[1, 2]
 
         denom = (1.0 + c11)*(1.0 + c33) - c13**2
-        # denom = max(denom, 1e-9)
+        denom = max(denom, 1e-9)
         denom_sqrt = math.sqrt(denom)
 
         numerator = c23*(1.0 + c11) - c12*c13
 
         factor = 2.0 / math.pi
-        val = factor * (1.0 / denom_sqrt) * (numerator / (1.0 + c11))
+        # Cap the argument of arcsin to the valid range [-1, 1]
+        arcsin_arg = (1.0 / denom_sqrt) * (numerator / (1.0 + c11))
+        arcsin_arg = np.clip(arcsin_arg, -1.0 + 1e-9, 1.0 - 1e-9)
+        val = factor * np.arcsin(arcsin_arg)
         return val
 
     @staticmethod
@@ -111,6 +113,15 @@ class LinearAnalyticIntegral:
         
         c12 = C[0, 1]
         return c12
+    
+    
+    @staticmethod
+    def J2(C: np.ndarray) -> float:
+        return C[0, 1]
+
+    @staticmethod
+    def I21(C: np.ndarray) -> float:
+        return C[0, 1]
 
     @staticmethod
     def I22(C: np.ndarray) -> float:
@@ -142,14 +153,7 @@ class ReLUAnalyticIntegral:
         C12 = C[0,1]
         C22 = C[1,1]
 
-        Sqdet = C11 * C22 - C12 ** 2
-        Sqdet = math.sqrt(Sqdet)
-        
-        res = 2 * Sqdet
-        res += C12 * math.pi
-        res += math.atan(C12 / Sqdet) * 2 * C12
-        res /= 8 * math.pi
-        return res
+        return C12/4 + C12*np.arcsin(C12/np.sqrt(C11*C22))/(2*np.pi) + np.sqrt(C11*C22 - C12*C12)/(2*np.pi)
 
     @staticmethod
     def J2(C: np.ndarray) -> float:
@@ -189,10 +193,10 @@ class ReLUAnalyticIntegral:
         if C.shape[0] < 2 or C.shape[1] < 2:
             raise ValueError("Covariance matrix C must be at least 2x2 for J2.")
         
-            
         C11 = C[0,0]
         C12 = C[0,1]
         C13 = C[0,2]
+        # C22 = C[1,1] #not used
         C23 = C[1,2]
         C33 = C[2,2]
 

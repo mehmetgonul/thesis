@@ -12,6 +12,9 @@ from numpy.polynomial.hermite_e import HermiteE, hermegauss
 import functools
 
 from src.activation_functions.activation_function import ActivationFunction
+@functools.cache
+def factorial2_custom(n: int):
+    return factorial2(n) if n > 1 else 1
 
 
 class GeLU(ActivationFunction):
@@ -31,6 +34,9 @@ class GeLU(ActivationFunction):
     @staticmethod
     def torch_fn(x: torch.Tensor) -> torch.Tensor:
         return torch.nn.functional.gelu(x)
+    
+    def __call__(self, x):
+        return self.torch_fn(x)
     
     def numpy_fn(self, x):
         return x * (1 + erf(x / np.sqrt(2))) / 2

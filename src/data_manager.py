@@ -2,21 +2,17 @@ import torch
 from src.config import RunConfig
 from torchvision import transforms, datasets
 import numpy as np
-from torch.utils.data import DataLoader, RandomSampler
+from torch.utils.data import DataLoader
 
 class DataManager:
     
     def __init__(self, seed: int, config: RunConfig):
         self.seed = seed
         self.config = config
-        self.dm_config = config.dm_config
         self.alpha = config.alpha
         self.dataset = self.dm_config.dataset
         self.rank = self.config.K
         self.D = config.D
-        self.noise = self.dm_config.noise
-        self.gaussian = self.dm_config.gaussian
-        self.online = (config.training_method == "online") # aligned with the config
     
     def _preprocess_data(self, dataset, mean: float = 0.5, std: float = 0.5):
         data_size = dataset.data.shape[0]
@@ -25,8 +21,8 @@ class DataManager:
         xs, ys = next(iter(dataloader))
         xs = xs.view(xs.shape[0], -1)
         
+        xs /= xs.std() *2 
         xs -= xs.mean()
-        xs /= xs.std()*2
         
         dataset = torch.utils.data.TensorDataset(xs, ys)
     
@@ -46,78 +42,48 @@ class DataManager:
             trainset = datasets.CIFAR10(root="./data/cifar-10/", train=True,
                             download=True, 
                             transform=input_transforms)
-        
-        elif self.dataset == "synthetic":
-            
-            # eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
-            v = []
-            lam = []
-            for i in range(self.rank):
-                lam.append(self.D * (i + 1))
-                temp = np.zeros(self.D)
-                temp[i] = 1
-                v.append(temp)
-            
-            v = np.array(v)
-            
-            cov = np.eye(self.D)
-            
-            for i in range(self.rank):
-                cov += lam[i] * np.outer(v[i], v[i])
-                
-            trainset = torch.utils.data.TensorDataset(torch.empty(0, self.D), torch.empty(0, dtype=torch.long))
 
         else: 
             raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")
         
-        if self.dataset != "synthetic":
-            trainset = self._preprocess_data(trainset)
-            omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(trainset)
+        trainset = self._preprocess_data(trainset)
+        omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(trainset)
         
-        else:
-            omega = cov
-            eigenvalues, eigenvectors = np.linalg.eigh(cov)
-            eigenvalues = np.maximum(eigenvalues, 0.0)
-            sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
 
-            omega, sqrt_omega, eigenvalues, eigenvectors
+
+    
+        gen = torch.Generator()
+        gen.manual_seed(self.seed)
+        
+        eigenvalues_torch = torch.from_numpy(eigenvalues).float()
+        eigenvectors_torch = torch.from_numpy(eigenvectors).float()
+
+        print("good?")
+        
+        num_samples = int(self.D * self.alpha)
+        
+        sqrtLambda = torch.diag(torch.sqrt(eigenvalues_torch))
+        
+        zs = torch.randn(num_samples, self.D, generator=gen)
+        xs = zs @ sqrtLambda @ eigenvectors_torch.T
         
         
+        # dummy labels
+        ys = torch.zeros(num_samples, dtype=torch.long)
         
-        if self.gaussian and self.dataset != "synthetic":
-            xs = np.random.randn(len(trainset), trainset[0][0].numel()) @ sqrt_omega
-            xs = torch.from_numpy(xs).float()
-            ys = trainset.tensors[1]
-            trainset = torch.utils.data.TensorDataset(xs, ys)
+        trainset = torch.utils.data.TensorDataset(xs, ys)
+        
+        trainloader = DataLoader(
+            trainset,
+            batch_size=1,
+            shuffle=False,
+        )
+        print("good till here")    
             
-        if self.online:
-            gen = torch.Generator()
-            gen.manual_seed(self.seed)
-            random_sampler = RandomSampler(
-                trainset,
-                replacement=True,
-                num_samples= self.D * self.alpha,
-                generator=gen
-            )
-            
-            trainloader = DataLoader(
-                trainset,
-                batch_size=1,
-                sampler=random_sampler,
-                # num_workers=2,
-                # prefetch_factor=1,
-                # pin_memory=True,
-            )
-        
-        else:
-            trainloader = DataLoader(
-                trainset,
-                batch_size=1,
-            )
-        
-        
         return trainloader, (omega, sqrt_omega, eigenvalues, eigenvectors)
 
+
+    # TODO: compute from op definition
     def get_testloader(self):
         
         if self.dataset == "fashion_mnist":
@@ -133,51 +99,24 @@ class DataManager:
                             download=True, 
                             transform=input_transforms)
         
-        elif self.dataset == "synthetic":
-            
-            # eigenvalues = torch.tensor([(2**m + 1) for m in range(1, self.rank+1)]).float()
-            v = []
-            lam = []
-            for i in range(self.rank):
-                lam.append(self.D * (i + 1))
-                temp = np.zeros(self.D)
-                temp[i] = 1
-                v.append(temp)
-            
-            cov = np.identity(self.D)
-            
-            for i in range(self.rank):
-                cov += lam[i] * v[i] * (v.T)[i]
-
+        
         else: 
             raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")
         
         
-        if self.dataset != "synthetic":
-            testset = self._preprocess_data(testset)
-            omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(testset)
+        testset = self._preprocess_data(testset)
+        omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(testset)
             
-        else:
-            eigenvalues, eigenvectors = np.linalg.eigh(cov)
-            eigenvalues = np.maximum(eigenvalues, 0.0)
-            sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
-            omega, sqrt_omega, eigenvalues, eigenvectors
-        
-        if self.gaussian and self.dataset != "synthetic":
-            xs = np.random.randn(len(testset), testset[0][0].numel()) @ sqrt_omega
-            xs = torch.from_numpy(xs).float()
-            ys = testset.tensors[1]
-            testset = torch.utils.data.TensorDataset(xs, ys)
-            
+    
         
         testloader = DataLoader(
             testset,
             batch_size=len(testset),
-            # num_workers=2,
-            # prefetch_factor=1,
-            # pin_memory=True,
         )
         
+        xs , _  = next(iter(testloader))
+        print(f"the norm^2 of my data is {xs.norm(dim=1).mean()**2 }")
+        print(f"std of data is {xs.std()}")
         
         return testloader, (omega, sqrt_omega, eigenvalues, eigenvectors)
 
@@ -191,3 +130,35 @@ class DataManager:
         eigenvalues = np.maximum(eigenvalues, 0.0)
         sqrt_omega = np.sqrt(np.diag(eigenvalues)) @ eigenvectors.T
         return omega, sqrt_omega, eigenvalues, eigenvectors
+    
+    
+    
+    def pca_errors(self, max_rank=None):
+        
+        if max_rank is None:
+            max_rank = self.rank
+        
+        
+        trainloader, (_, _, eigenvalues, eigenvectors) = self.get_trainloader(bs=10_000)
+        xs, _ = next(iter(trainloader))
+        xs = xs.to(torch.float32)
+        
+        eigenvectors = torch.from_numpy(eigenvectors).to(xs.device, xs.dtype)
+        
+        pca_errors = []
+        
+        for m in range(1, max_rank + 1):
+            print(f"calculting error for rank {m}")
+            projections = eigenvectors[:, -m:]
+            z = xs @ projections
+            
+            x_reconstruction = z @ projections.T
+
+            pca_error = torch.nn.functional.mse_loss(x_reconstruction, xs) * 0.5
+            
+            pca_errors.append(pca_error)
+        
+        
+        return pca_errors
+            
+        

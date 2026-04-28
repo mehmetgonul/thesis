@@ -1,0 +1,58 @@
+run_name: "relu_run_k=3"
+
+runs:
+  - dm_config:
+      dataset: "cifar-10"
+      rank: 3
+      batch_size: 1
+    activation_function: "relu"
+    tied: false
+    bias: true
+    scale_online: true
+    alpha: 1000
+    dynamics_mode: "online"
+    learning_rate: 1.0
+    D: 1024
+    K: 3
+
+  - dm_config:
+      dataset: "cifar-10"
+      rank: 3
+      batch_size: 1
+    activation_function: "relu"
+    tied: false
+    bias: true
+    scale_online: true
+    alpha: 1000
+    dynamics_mode: "online"
+    learning_rate: 1.0
+    D: 1024
+    K: 3
+  
+  # - dm_config:
+  #     dataset: "cifar-10"
+  #     rank: 2
+  #     batch_size: 1
+  #   activation_function: "linear"
+  #   tied: false
+  #   bias: true
+  #   scale_online: true
+  #   alpha: 400
+  #   dynamics_mode: "online"
+  #   learning_rate: 1.0
+  #   D: 1024
+  #   K: 2
+  
+  # - dm_config:
+  #     dataset: "cifar-10"
+  #     rank: 3
+  #     batch_size: 1
+  #   activation_function: "gelu"
+  #   tied: false
+  #   bias: true
+  #   scale_online: true
+  #   alpha: 650
+  #   dynamics_mode: "online"
+  #   learning_rate: 1.0
+  #   D: 1024
+  #   K: 3

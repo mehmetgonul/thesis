@@ -15,11 +15,13 @@ class ReLU(ActivationFunction):
         self.stretch = stretch
         
         self.coeffs = []
-        self.coeffs_normalized = []
         
     @staticmethod
     def torch_fn(x: torch.Tensor) -> torch.Tensor:
         return torch.nn.functional.relu(x)
+    
+    def __call__(self, x):
+        return self.torch_fn(x)
     
     def numpy_fn(self, x):
         return np.maximum(0.0, self.stretch * x)
@@ -27,7 +29,7 @@ class ReLU(ActivationFunction):
     def derivative_numpy_fn(self, x):
         return (x > 0).astype(float) * self.stretch
         
-    def calc_coefficients(self, N=10, normalized=True, no_samples=25):
+    def calc_coefficients(self, N=10):
         
         a = self.stretch
         
@@ -48,9 +50,8 @@ class ReLU(ActivationFunction):
             c_n *= a
             
             self.coeffs.append(c_n)
-            self.coeffs_normalized.append(c_n/ (np.sqrt(factorial(n))))
             
-        return self.coeffs if not normalized else self.coeffs_normalized
+        return self.coeffs
         
     def __str__(self):
         return "ReLU"

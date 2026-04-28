@@ -1,3 +1,3 @@
 
 
-python -m src.main ./configs/erf.yaml
+python -m src.main ./configs/relu_cifar.yaml

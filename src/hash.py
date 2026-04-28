@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict, is_dataclass
+from pathlib import Path
+
+
+def _to_dict(value):
+    return asdict(value) if is_dataclass(value) else value
+
+
+def make_hash(run_config=None, probe_config=None, seed=None):
+    payload = {
+        k: v
+        for k, v in {
+            "run_config": _to_dict(run_config) if run_config is not None else None,
+            "probe_config": _to_dict(probe_config) if probe_config is not None else None,
+            "seed": int(seed) if seed is not None else None,
+        }.items()
+        if v is not None
+    }
+
+    if not payload:
+        raise ValueError("empty hash payload")
+
+    canonical = json.dumps(payload, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def check_hash(run_config=None, probe_config=None, seed=None):
+    run_hash = make_hash(run_config, probe_config, seed)
+    base_name = f"seed{seed}_{run_hash}" if seed is not None else run_hash
+    checkpoint = Path("artifacts") / run_hash / f"{base_name}.pt"
+    results = Path("artifacts") / run_hash / f"{base_name}.jsonl"
+    return (str(checkpoint), str(results)) if checkpoint.is_file() and results.is_file() else None

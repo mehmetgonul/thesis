@@ -7,24 +7,24 @@ from numpy.polynomial.hermite_e import HermiteE, hermegauss
 import functools
 
 class HermiteWrapper():
-    def __init__(self, g: str):
-        
+    def __init__(self, g: str, N = 10):
+        self.N = N
         self.g: ActivationFunction = activation_function_factory(g)
         
-    def I2(self, C, N=10):
-        return HermiteSeries.I2(C, self.g, self.g)
+    def I2(self, C):
+        return HermiteSeries.I2(C, self.g, self.g, self.N)
     
-    def J2(self, C, N=10):
-        return HermiteSeries.J2(C, self.g, N)
+    def J2(self, C):
+        return HermiteSeries.J2(C, self.g, self.N)
 
-    def I21(self, C, N=10):
-        return HermiteSeries.I21(C, self.g, N)
+    def I21(self, C):
+        return HermiteSeries.I21(C, self.g, self.N)
 
-    def I22(self, C, N=10):
-        return HermiteSeries.I22(C, self.g, N)
+    def I22(self, C):
+        return HermiteSeries.I22(C, self.g, self.N)
 
-    def I3(self, C, N=10):
-        return HermiteSeries.I3(C, self.g, self.g, N)
+    def I3(self, C):
+        return HermiteSeries.I3(C, self.g, self.g, self.N)
 
 
 class HermiteSeries(Integral):
@@ -44,7 +44,7 @@ class HermiteSeries(Integral):
         g1_coeffs = np.asarray(g1.calc_coefficients(N))
         g2_coeffs = np.asarray(g2.calc_coefficients(N))
         
-        for i in range(N):
+        for i in range(N+1):
             g1_coeffs[i] /= np.sqrt(factorial(i))
             g2_coeffs[i] /= np.sqrt(factorial(i))
         
@@ -52,10 +52,15 @@ class HermiteSeries(Integral):
 
     @staticmethod
     def J2(C, g: ActivationFunction, N=30) -> float:
+        try:        
+            std1, std2 = np.sqrt(np.diagonal(C))
+        except ValueError:
+            diag = np.sqrt(np.diagonal(C))
+            std1 = diag[0]
+            std2 = diag[1]
+            print("too many values to unpack error")        
+            print(C)
         
-        std1, std2 = np.diagonal(C)
-        std1 = np.sqrt(std1)
-        std2 = np.sqrt(std2)
         
         g = g.scale(std2)
         

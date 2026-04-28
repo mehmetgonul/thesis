@@ -5,45 +5,23 @@ from pathlib import Path
 from dataclasses import fields, is_dataclass, fields
 from typing import get_origin, get_args, Union, Type, Any, Dict
 
-@dataclass(frozen=True)
-class DataManagerConfig:
-    dataset: str # "synthetic" | "cifar-10" | "fashion_mnist"
-    rank: int
-    batch_size: int
-    noise: float = 0.
-    gaussian: bool = False
 
 @dataclass(frozen=False)
 class RunConfig:
-    dm_config: DataManagerConfig
+    dataset: str # "cifar-10" | "fashion_mnist"
     activation_function: str # "erf" | "relu" | "linear" | "gelu" | "exp"
     tied: bool
-    scale_online_training: bool 
-    plot_label: str 
     bias: bool
+    init_uniform: bool # if this than init_std is not important is initialization would be uniform
+    init_std: float
     alpha: int
-    training_method: str # "analytical" | "hermite" | "online"
     learning_rate: float
+    
     N: Optional[int] # The degree of approximation when hermite is used
-    
-    line_type: str # "dashed" | "solid"
-    line_color: str # color of the lines
-    
     D: int # input size - determined by the data set choice
     K: int # hidden state dimension
     
     
-    ode_method: str = "rk45" # "euler" | "rk45"
-    
-
-@dataclass(frozen=True)
-class ExperimentConfig:
-    run_name: str
-    runs: list[RunConfig]
-    
-    plot_name: str
-    x_label: str
-    y_label: str
     
     
 def _unwrap_optional(annotation):
@@ -92,7 +70,7 @@ def _build(cls, payload: Any):
     return cls(**kwargs)
 
 
-def parse_config(src: Union[str, Path, dict]) -> ExperimentConfig:
+def parse_config(src: Union[str, Path, dict]) -> RunConfig:
     """
     Accepts
       • a `str` / `Path` pointing to a YAML/JSON file, **or**
@@ -107,4 +85,4 @@ def parse_config(src: Union[str, Path, dict]) -> ExperimentConfig:
     else:
         raise TypeError(f"parse_config() needs str, Path or dict - got {type(src).__name__}")
 
-    return _build(ExperimentConfig, cfg_dict)
+    return _build(RunConfig, cfg_dict)

@@ -1,0 +1,16 @@
+run_name: "k=4_linear"
+
+runs:
+  - dm_config:
+      dataset: "cifar-10"
+      rank: 4
+      batch_size: 1
+    activation_function: "linear"
+    tied: false
+    bias: false
+    scale_online: true
+    alpha: 1000
+    dynamics_mode: "online"
+    learning_rate: 1.0
+    D: 1024
+    K: 4
