@@ -36,7 +36,7 @@ class AutoEncoder(nn.Module):
             self.decoder = nn.Linear(self.hidden_size, self.input_size, bias=False)
             
             if config.init_uniform:
-                nn.init.uniform_(self.encoder.weight, a=-self.scale_factor, b=self.scale_factor)
+                nn.init.uniform_(self.decoder.weight, a=-self.scale_factor, b=self.scale_factor)
             else:
                 nn.init.normal_(self.decoder.weight, mean=0.0, std=config.init_std)
         

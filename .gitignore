@@ -36,6 +36,10 @@ data/
 *.spec
 .codex
 
+# don't commit outputs and scripts
+artifacts
+.sh 
+
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt

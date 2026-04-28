@@ -88,9 +88,6 @@ def parse_config(src: Union[str, Path, dict]) -> RunConfig:
         raise TypeError(f"parse_config() needs str, Path or dict - got {type(src).__name__}")
 
     if "runs" in cfg_dict:
-        cfg_dict = cfg_dict["runs"][0]
-    dm_config = cfg_dict.get("dm_config") or cfg_dict.get("data_manager")
-    if dm_config is not None and "dataset" not in cfg_dict:
-        cfg_dict["dataset"] = dm_config["dataset"]
+        raise ValueError("Expected a single RunConfig, not an experiment config with runs.")
 
     return _build(RunConfig, cfg_dict)

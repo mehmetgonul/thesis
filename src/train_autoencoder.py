@@ -22,7 +22,7 @@ from src.utils import set_seed
 
 
 
-SEEDS = [40, 41, 42, 43, 44, 45]
+SEEDS = [40, 41, 42]
 
 def compute_order_parameters_from_weights(model: AutoEncoder, omega):
     W = model.encoder.weight.data.detach().cpu().numpy()
@@ -82,10 +82,10 @@ def test_error_with_order_parameters(T0, T1, Q1, R1, omega, integral: Integral):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=Path)
-    parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
     parser.add_argument("--device", default="auto")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
+    artifacts_dir = Path("artifacts")
 
     if args.device == "auto":
         if torch.backends.mps.is_available():
@@ -103,7 +103,7 @@ def main() -> None:
     integral = analytical_integral_factory(run_config.activation_function)
 
     for seed in SEEDS:
-        out_dir = args.runs_dir / run_hash / "autoencoder" / f"seed_{seed}"
+        out_dir = artifacts_dir / run_hash / "autoencoder" / f"seed_{seed}"
         model_path = out_dir / "model.pt"
         loss_path = out_dir / "loss.jsonl"
 

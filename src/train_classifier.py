@@ -16,15 +16,12 @@ from src.hash import make_hash
 from src.utils import set_seed
 
 
-SEEDS = [40, 41, 42, 43, 44, 45]
+SEEDS = [40, 41, 42]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=Path)
-
-    parser.add_argument("--runs-dir", type=Path, default=Path("runs"))
-
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
@@ -35,6 +32,7 @@ def main() -> None:
     parser.add_argument("--overwrite", action="store_true")
 
     args = parser.parse_args()
+    artifacts_dir = Path("artifacts")
 
     if args.device == "auto":
         if torch.backends.mps.is_available():
@@ -53,7 +51,7 @@ def main() -> None:
         set_seed(seed)
 
         autoencoder_path = (
-            args.runs_dir
+            artifacts_dir
             / train_hash
             / "autoencoder"
             / f"seed_{seed}"
@@ -61,7 +59,7 @@ def main() -> None:
         )
 
         out_dir = (
-            args.runs_dir
+            artifacts_dir
             / train_hash
             / "probes"
             / "linear"

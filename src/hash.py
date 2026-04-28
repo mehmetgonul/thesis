@@ -27,9 +27,9 @@ def make_hash(run_config=None, seed=None):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def check_hash(run_config=None, probe_config=None, seed=None):
-    run_hash = make_hash(run_config=run_config, seed=seed)
-    base_name = f"seed{seed}_{run_hash}" if seed is not None else run_hash
-    checkpoint = Path("artifacts") / run_hash / f"{base_name}.pt"
-    results = Path("artifacts") / run_hash / f"{base_name}.jsonl"
+def check_hash(run_config=None, seed=None, artifacts_dir=Path("artifacts")):
+    run_hash = make_hash(run_config=run_config)
+    base = artifacts_dir / run_hash / "autoencoder" / f"seed_{seed}"
+    checkpoint = base / "model.pt"
+    results = base / "loss.jsonl"
     return (str(checkpoint), str(results)) if checkpoint.is_file() and results.is_file() else None
