@@ -1,0 +1,9 @@
+dataset: "cifar-10"
+activation_function: "h3"
+tied: false
+bias: false
+alpha: 1000
+learning_rate: 1.0
+D: 1024
+K: 3
+init_std: 0.5

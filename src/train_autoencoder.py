@@ -14,6 +14,7 @@ from src.config import parse_config
 from src.data_manager import DataManager
 from src.hash import make_hash
 from src.integrals import analytical_integral_factory
+from src.integrals.hermite_series_integrals import HermiteWrapper
 
 from itertools import product
 
@@ -23,6 +24,15 @@ from src.utils import set_seed
 
 
 SEEDS = [40, 41, 42]
+HERMITE_ACTIVATIONS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+
+def integral_for_activation(activation_function: str, N: int | None = None):
+    activation_function = activation_function.lower()
+    if activation_function in HERMITE_ACTIVATIONS:
+        degree = int(activation_function[1:])
+        return HermiteWrapper(activation_function, N=max(N or degree, degree))
+    return analytical_integral_factory(activation_function)
 
 def compute_order_parameters_from_weights(model: AutoEncoder, omega):
     W = model.encoder.weight.data.detach().cpu().numpy()
@@ -70,7 +80,7 @@ def test_error_with_order_parameters(T0, T1, Q1, R1, omega, integral: Integral):
 
 
     I2m = np.asarray([integral.I2(C2Mat[k,l])* T0[k,l] for k, l in product(range(K),range(K))])
-    J2m = sum([integral.J2(C2Vec[k]) for k in range(K)])
+    J2m = sum([integral.J2(C2Vec[k]) for k in range(K)]) # 0 for even hermite series activation functions
     
     error  = 0.5*np.trace(omega)/D
     
@@ -79,11 +89,35 @@ def test_error_with_order_parameters(T0, T1, Q1, R1, omega, integral: Integral):
     return error , (0.5*np.trace(omega)/D, np.sum(J2m), 0.5*np.sum(I2m) )
 
 
+
+def reconstruction_loss(model: AutoEncoder, dataloader, device: torch.device) -> float:
+    # empirical reconstruction loss for experiments with bias and even activation function
+    
+    
+    total_loss = 0.0
+    total_elements = 0
+
+    model.eval()
+    with torch.no_grad():
+        for x, _ in dataloader:
+            x = x.to(device)
+            reconstruction = model(x)
+            loss = 0.5 * nn.functional.mse_loss(
+                reconstruction,
+                x,
+                reduction="sum",
+            )
+            total_loss += float(loss.detach().cpu())
+            total_elements += x.numel()
+
+    return total_loss / total_elements
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=Path)
     parser.add_argument("--device", default="auto")
-    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--overwrite", action="store_false")
     args = parser.parse_args()
     artifacts_dir = Path("artifacts")
 
@@ -100,17 +134,28 @@ def main() -> None:
     run_config = parse_config(args.config)
 
     run_hash = make_hash(run_config=run_config)
-    integral = analytical_integral_factory(run_config.activation_function)
+    integral = integral_for_activation(run_config.activation_function, run_config.N)
 
     for seed in SEEDS:
         out_dir = artifacts_dir / run_hash / "autoencoder" / f"seed_{seed}"
         model_path = out_dir / "model.pt"
         loss_path = out_dir / "loss.jsonl"
 
-        if not args.overwrite and model_path.exists() and loss_path.exists():
+        out_dir_exists = out_dir.exists()
+        model_exists = model_path.exists()
+        loss_exists = loss_path.exists()
+        print(
+            f"exists: out_dir={out_dir_exists} "
+            f"model_path={model_exists} loss_path={loss_exists}"
+        )
+
+        # if model isn't done (experiment isn't done), do experiment
+        # skip otherwise
+        if model_exists and loss_exists:
             print(f"skip: {out_dir}")
             continue
 
+        # if partial run is done, erase past run data
         out_dir.mkdir(parents=True, exist_ok=True)
         if loss_path.exists():
             loss_path.unlink()
@@ -119,12 +164,18 @@ def main() -> None:
 
         set_seed(seed)
 
+        # setting up datasets and covariance matrices
         dm = DataManager(seed, run_config)
-
         trainloader, (omega, _, _, _) = dm.get_trainloader()
+        testloader, (omega_test, _, _, _) = dm.get_testloader()
+        
+        if not run_config.test_loss:
+            testloader = None
 
         model = AutoEncoder(config=run_config).to(device)
 
+    
+        # scaling learning rate
         params = [{"params": model.encoder.weight, "lr": run_config.learning_rate / run_config.D}]
         if run_config.bias and model.encoder.bias is not None:
             params.append({"params": model.encoder.bias, "lr": run_config.learning_rate})
@@ -138,6 +189,8 @@ def main() -> None:
 
         with loss_path.open("w", encoding="utf-8") as f:
             while alpha < run_config.alpha:
+                
+                # looped iteration over training set
                 try:
                     x, _ = next(train_iter)
                 except StopIteration:
@@ -154,21 +207,29 @@ def main() -> None:
                 train_loss.backward()
                 optimizer.step()
 
+                completed_steps = step + 1
+                test_loss = None
                 model.eval()
+                
+                
                 with torch.no_grad():
                     # also order parameters are used for a more robust result
                     T1, Q1, R1, T0, Q0, R0 = compute_order_parameters_from_weights(
                         model=model,
-                        omega=omega,
+                        omega=omega_test, # test set covariance is used for OP
                     )
                     ge, _ = test_error_with_order_parameters(
                         T0,
                         T1,
                         Q1,
                         R1,
-                        omega,
+                        omega_test, # test set for correct generalization error
                         integral,
                     )
+                    
+                # computed every alpha value, not D * alpha times like generalization error
+                if testloader is not None and completed_steps % run_config.D == 0:
+                    test_loss = reconstruction_loss(model, testloader, device)
 
                 alpha += 1.0 / run_config.D
                 row = {
@@ -177,15 +238,19 @@ def main() -> None:
                     "loss": float(train_loss.detach().cpu()),
                     "generalization_error": float(ge),
                 }
+                if test_loss is not None:
+                    row["test_loss"] = float(test_loss)
+                if model.encoder.bias is not None:
+                    row["bias_values"] = model.encoder.bias.detach().cpu().tolist()
                 f.write(json.dumps(row) + "\n")
 
-                print(
-                    f"seed={seed} "
-                    f"step={step} alpha={alpha:.6f} "
-                    f"loss={row['loss']:.6g} ge={row['generalization_error']:.6g}"
-                )
+                # print(
+                #     f"seed={seed} "
+                #     f"step={step} alpha={alpha:.6f} "
+                #     f"loss={row['loss']:.6g} ge={row['generalization_error']:.6g}"
+                # )
                 step += 1
-
+        
         torch.save(model.state_dict(), model_path)
         print(f"saved: {model_path}")
 

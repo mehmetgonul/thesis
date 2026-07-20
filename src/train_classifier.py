@@ -18,12 +18,18 @@ from src.utils import set_seed
 
 SEEDS = [40, 41, 42]
 
+# computes if the correct class is in top k predictions
+def topk_correct(logits: torch.Tensor, y: torch.Tensor, k: int) -> torch.Tensor:
+    k = min(k, logits.shape[1])
+    predictions = logits.topk(k, dim=1).indices
+    return (predictions == y.unsqueeze(1)).any(dim=1)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=Path)
     parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--epochs", type=int, default=20)
+    parser.add_argument("--epochs", type=int, default=25)
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=0.0)
     parser.add_argument("--num-classes", type=int, default=10)
@@ -75,6 +81,8 @@ def main() -> None:
                 f"Missing autoencoder checkpoint for seed {seed}: {autoencoder_path}"
             )
 
+        # if model isn't done (experiment isn't done), do experiment
+        # skip otherwise
         if (
             not args.overwrite
             and classifier_path.exists()
@@ -86,6 +94,8 @@ def main() -> None:
 
         out_dir.mkdir(parents=True, exist_ok=True)
 
+        
+        # if partial run is done, erase past run data
         if loss_path.exists():
             loss_path.unlink()
         if classifier_path.exists():
@@ -102,6 +112,7 @@ def main() -> None:
         else:
             autoencoder.load_state_dict(checkpoint)
 
+        # freeze weights of autoencoder
         autoencoder.eval()
 
         for parameter in autoencoder.parameters():
@@ -140,28 +151,33 @@ def main() -> None:
                     loss.backward()
                     optimizer.step()
 
-                    predictions = logits.argmax(dim=1)
-                    accuracy = (predictions == y).float().mean()
+                    top1 = topk_correct(logits, y, k=1).float().mean()
+                    top3 = topk_correct(logits, y, k=3).float().mean()
 
                     row = {
                         "step": step,
                         "epoch": epoch,
                         "loss": float(loss.detach().cpu()),
-                        "accuracy": float(accuracy.detach().cpu()),
+                        "accuracy": float(top1.detach().cpu()),
+                        "accuracy_at_1": float(top1.detach().cpu()),
+                        "accuracy_at_3": float(top3.detach().cpu()),
                     }
 
                     f.write(json.dumps(row) + "\n")
 
-                    print(
-                        f"seed={seed} epoch={epoch} step={step} "
-                        f"loss={row['loss']:.6g} acc={row['accuracy']:.4f}"
-                    )
+                    # print(
+                    #     f"seed={seed} epoch={epoch} step={step} "
+                    #     f"loss={row['loss']:.6g} "
+                    #     f"acc@1={row['accuracy_at_1']:.4f} "
+                    #     f"acc@3={row['accuracy_at_3']:.4f}"
+                    # )
 
                     step += 1
 
         classifier.eval()
 
-        total_correct = 0
+        total_correct_at_1 = 0
+        total_correct_at_3 = 0
         total_count = 0
         total_loss = 0.0
 
@@ -174,15 +190,19 @@ def main() -> None:
                 logits = classifier(z)
                 loss = F.cross_entropy(logits, y, reduction="sum")
 
-                predictions = logits.argmax(dim=1)
+                correct_at_1 = topk_correct(logits, y, k=1)
+                correct_at_3 = topk_correct(logits, y, k=3)
 
                 total_loss += float(loss.detach().cpu())
-                total_correct += int((predictions == y).sum().detach().cpu())
+                total_correct_at_1 += int(correct_at_1.sum().detach().cpu())
+                total_correct_at_3 += int(correct_at_3.sum().detach().cpu())
                 total_count += int(y.numel())
 
         metrics = {
             "test_loss": total_loss / total_count,
-            "test_accuracy": total_correct / total_count,
+            "test_accuracy": total_correct_at_1 / total_count,
+            "test_accuracy_at_1": total_correct_at_1 / total_count,
+            "test_accuracy_at_3": total_correct_at_3 / total_count,
             "num_test_examples": total_count,
         }
 

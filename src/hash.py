@@ -7,7 +7,23 @@ from pathlib import Path
 
 
 def _to_dict(value):
-    return asdict(value) if is_dataclass(value) else value
+    payload = asdict(value) if is_dataclass(value) else value
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        
+        if payload.get("init_unit_sphere") is False:
+            payload.pop("init_unit_sphere")
+            
+        if payload.get("unit_sphere_scale") in (None, 1, 1.0):
+            payload.pop("unit_sphere_scale")
+
+        if payload.get("preprocess_data") is True:
+            payload.pop("preprocess_data")
+
+        if payload.get("test_loss") is False:
+            payload.pop("test_loss")
+        
+    return payload
 
 
 def make_hash(run_config=None, seed=None):

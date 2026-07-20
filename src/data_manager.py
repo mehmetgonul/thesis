@@ -14,18 +14,30 @@ class DataManager:
         self.rank = self.config.K
         self.D = config.D
     
-    def _preprocess_data(self, dataset, mean: float = 0.5, std: float = 0.5):
+    def _preprocess_data(self, dataset, mean=None, std=None, return_stats=False):
         data_size = dataset.data.shape[0]
         dataloader = torch.utils.data.DataLoader(dataset, batch_size=data_size, shuffle=False)
         
         xs, ys = next(iter(dataloader))
         xs = xs.view(xs.shape[0], -1)
         
-        xs /= xs.std() *2 
-        xs -= xs.mean()
+        if self.config.preprocess_data:
+            if std is None:
+                std = xs.std()
+            xs /= std * 2
+            if mean is None:
+                mean = xs.mean()
+            xs -= mean
+        else:
+            if mean is None:
+                mean = torch.zeros((), dtype=xs.dtype, device=xs.device)
+            if std is None:
+                std = torch.ones((), dtype=xs.dtype, device=xs.device)
         
         dataset = torch.utils.data.TensorDataset(xs, ys)
     
+        if return_stats:
+            return dataset, mean, std
         return dataset
     
     def get_trainloader(self):
@@ -48,29 +60,23 @@ class DataManager:
         
         trainset = self._preprocess_data(trainset)
         omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(trainset)
+
+        loader = DataLoader(trainset, batch_size=len(trainset), shuffle=False)
+        xs, _ = next(iter(loader))
         
 
-
-    
-        gen = torch.Generator()
-        gen.manual_seed(self.seed)
-        
-        eigenvalues_torch = torch.from_numpy(eigenvalues).float()
-        eigenvectors_torch = torch.from_numpy(eigenvectors).float()
-
-        print("good?")
-        
         num_samples = int(self.D * self.alpha)
-        
-        sqrtLambda = torch.diag(torch.sqrt(eigenvalues_torch))
-        
-        zs = torch.randn(num_samples, self.D, generator=gen)
-        xs = zs @ sqrtLambda @ eigenvectors_torch.T
+
         
         
         # dummy labels
         ys = torch.zeros(num_samples, dtype=torch.long)
-        
+
+        if num_samples > len(xs):
+            repeats = (num_samples // len(xs)) + 1
+            xs = xs.repeat(repeats, 1)[:num_samples]
+        else:
+            xs = xs[:num_samples]
         trainset = torch.utils.data.TensorDataset(xs, ys)
         
         trainloader = DataLoader(
@@ -144,8 +150,8 @@ class DataManager:
         else:
             raise ValueError(f"Probe loaders unsupported for dataset '{self.dataset}'")
 
-        trainset = self._preprocess_data(trainset)
-        testset = self._preprocess_data(testset)
+        trainset, mean, std = self._preprocess_data(trainset, return_stats=True)
+        testset = self._preprocess_data(testset, mean=mean, std=std)
 
         return (
             DataLoader(trainset, batch_size=batch_size, shuffle=True),
@@ -170,27 +176,24 @@ class DataManager:
         if max_rank is None:
             max_rank = self.rank
         
-        
-        trainloader, (_, _, eigenvalues, eigenvectors) = self.get_trainloader(bs=10_000)
-        xs, _ = next(iter(trainloader))
-        xs = xs.to(torch.float32)
-        
-        eigenvectors = torch.from_numpy(eigenvectors).to(xs.device, xs.dtype)
-        
-        pca_errors = []
-        
-        for m in range(1, max_rank + 1):
-            print(f"calculting error for rank {m}")
-            projections = eigenvectors[:, -m:]
-            z = xs @ projections
-            
-            x_reconstruction = z @ projections.T
+        if self.dataset == "fashion_mnist":
+            input_transforms = transforms.Compose([transforms.ToTensor()])
+            trainset = datasets.FashionMNIST(root="./data/fashionMNIST", train=True,
+                                download=True,
+                                transform=input_transforms)
+        elif self.dataset == "cifar-10":
+            input_transforms = transforms.Compose([transforms.Grayscale(),
+                                       transforms.ToTensor()])
+            trainset = datasets.CIFAR10(root="./data/cifar-10/", train=False,
+                            download=True,
+                            transform=input_transforms)
+        else:
+            raise ValueError(f"Datamanager: self.dataset is not valid '{self.dataset}'")
 
-            pca_error = torch.nn.functional.mse_loss(x_reconstruction, xs) * 0.5
-            
-            pca_errors.append(pca_error)
-        
-        
-        return pca_errors
+        trainset = self._preprocess_data(trainset)
+        _, _, eigenvalues, _ = self._compute_covariance(trainset)
+        max_rank = min(max_rank, len(eigenvalues))
+
+        return [0.5 * float(eigenvalues[:-m].sum()) / len(eigenvalues) for m in range(1, max_rank + 1)]
             
         
