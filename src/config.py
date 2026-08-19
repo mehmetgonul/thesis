@@ -23,6 +23,7 @@ class RunConfig:
     init_std: float = 0.01
     N: Optional[int] = None # The degree of approximation when hermite is used
     test_loss: bool = False
+    ode_sol: bool = False
     
     
     

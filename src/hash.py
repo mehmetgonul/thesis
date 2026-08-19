@@ -22,6 +22,10 @@ def _to_dict(value):
 
         if payload.get("test_loss") is False:
             payload.pop("test_loss")
+
+        # The solver selects which artifact is produced, not the identity of
+        # the experiment. Online and ODE results therefore share one hash.
+        payload.pop("ode_sol", None)
         
     return payload
 
@@ -46,6 +50,22 @@ def make_hash(run_config=None, seed=None):
 def check_hash(run_config=None, seed=None, artifacts_dir=Path("artifacts")):
     run_hash = make_hash(run_config=run_config)
     base = artifacts_dir / run_hash / "autoencoder" / f"seed_{seed}"
-    checkpoint = base / "model.pt"
-    results = base / "loss.jsonl"
-    return (str(checkpoint), str(results)) if checkpoint.is_file() and results.is_file() else None
+    if isinstance(run_config, dict):
+        ode_sol = bool(run_config.get("ode_sol", False))
+        tied = bool(run_config.get("tied", False))
+        bias = bool(run_config.get("bias", False))
+    else:
+        ode_sol = bool(getattr(run_config, "ode_sol", False))
+        tied = bool(getattr(run_config, "tied", False))
+        bias = bool(getattr(run_config, "bias", False))
+    ode_sol = ode_sol and not tied and not bias
+    checkpoint = base / ("ode_state.npz" if ode_sol else "model.pt")
+    results = base / ("ode_loss.jsonl" if ode_sol else "loss.jsonl")
+    required = [checkpoint, results]
+    if ode_sol:
+        required.extend([base / "ode_meta.json", base / "initial_model.pt"])
+    return (
+        (str(checkpoint), str(results))
+        if all(path.is_file() for path in required)
+        else None
+    )

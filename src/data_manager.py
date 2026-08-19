@@ -89,6 +89,36 @@ class DataManager:
         return trainloader, (omega, sqrt_omega, eigenvalues, eigenvectors)
 
 
+    def get_ode_statistics(self):
+        """Return the full training covariance spectrum without making samples."""
+
+        if self.dataset == "fashion_mnist":
+            input_transforms = transforms.Compose([transforms.ToTensor()])
+            trainset = datasets.FashionMNIST(
+                root="./data/fashionMNIST",
+                train=True,
+                download=True,
+                transform=input_transforms,
+            )
+        elif self.dataset == "cifar-10":
+            input_transforms = transforms.Compose(
+                [transforms.Grayscale(), transforms.ToTensor()]
+            )
+            trainset = datasets.CIFAR10(
+                root="./data/cifar-10/",
+                train=True,
+                download=True,
+                transform=input_transforms,
+            )
+        else:
+            raise ValueError(
+                f"Datamanager: self.dataset is not valid '{self.dataset}'"
+            )
+
+        trainset = self._preprocess_data(trainset)
+        return self._compute_covariance(trainset)
+
+
     # TODO: compute from op definition
     def get_testloader(self):
         
@@ -125,38 +155,6 @@ class DataManager:
         print(f"std of data is {xs.std()}")
         
         return testloader, (omega, sqrt_omega, eigenvalues, eigenvectors)
-
-
-    def get_probe_loaders(self, batch_size: int = 256):
-        if self.dataset == "fashion_mnist":
-            input_transforms = transforms.Compose([transforms.ToTensor()])
-            trainset = datasets.FashionMNIST(root="./data/fashionMNIST", train=True,
-                                download=True,
-                                transform=input_transforms)
-            testset = datasets.FashionMNIST(root="./data/fashionMNIST", train=False,
-                                download=True,
-                                transform=input_transforms)
-
-        elif self.dataset == "cifar-10":
-            input_transforms = transforms.Compose([transforms.Grayscale(),
-                                       transforms.ToTensor()])
-            trainset = datasets.CIFAR10(root="./data/cifar-10/", train=True,
-                            download=True,
-                            transform=input_transforms)
-            testset = datasets.CIFAR10(root="./data/cifar-10/", train=False,
-                            download=True,
-                            transform=input_transforms)
-
-        else:
-            raise ValueError(f"Probe loaders unsupported for dataset '{self.dataset}'")
-
-        trainset, mean, std = self._preprocess_data(trainset, return_stats=True)
-        testset = self._preprocess_data(testset, mean=mean, std=std)
-
-        return (
-            DataLoader(trainset, batch_size=batch_size, shuffle=True),
-            DataLoader(testset, batch_size=batch_size, shuffle=False),
-        )
 
 
     def _compute_covariance(self, dataset):

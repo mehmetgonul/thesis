@@ -15,6 +15,12 @@ from src.data_manager import DataManager
 from src.hash import make_hash
 from src.integrals import analytical_integral_factory
 from src.integrals.hermite_series_integrals import HermiteWrapper
+from src.ode_solver import (
+    MAX_RK45_ALPHA_STEP,
+    MIN_ODE_ALPHA,
+    ODESample,
+    solve_ode_from_model,
+)
 
 from itertools import product
 
@@ -25,6 +31,7 @@ from src.utils import set_seed
 
 SEEDS = [40, 41, 42]
 HERMITE_ACTIVATIONS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+ODE_RESULT_ALPHA_STEP = 1.0
 
 
 def integral_for_activation(activation_function: str, N: int | None = None):
@@ -133,6 +140,31 @@ def main() -> None:
 
     run_config = parse_config(args.config)
 
+    if run_config.ode_sol and (run_config.tied or run_config.bias):
+        reasons = []
+        if run_config.tied:
+            reasons.append("tied: true")
+        if run_config.bias:
+            reasons.append("bias: true")
+        print(
+            "ode_sol: true is unsupported with "
+            + ", ".join(reasons)
+            + "; overriding ode_sol to false and running online SGD"
+        )
+        run_config.ode_sol = False
+
+    if run_config.ode_sol and run_config.test_loss:
+        print(
+            "warning: test_loss is ignored in ODE mode because no final "
+            "PyTorch model is evolved"
+        )
+
+    if run_config.ode_sol and 0.0 <= float(run_config.alpha) < MIN_ODE_ALPHA:
+        print(
+            f"ODE alpha={run_config.alpha} is below the minimum horizon; "
+            f"solving through alpha={MIN_ODE_ALPHA:g}"
+        )
+
     run_hash = make_hash(run_config=run_config)
     integral = integral_for_activation(run_config.activation_function, run_config.N)
 
@@ -140,39 +172,117 @@ def main() -> None:
         out_dir = artifacts_dir / run_hash / "autoencoder" / f"seed_{seed}"
         model_path = out_dir / "model.pt"
         loss_path = out_dir / "loss.jsonl"
+        ode_loss_path = out_dir / "ode_loss.jsonl"
+        ode_state_path = out_dir / "ode_state.npz"
+        ode_meta_path = out_dir / "ode_meta.json"
+        initial_model_path = out_dir / "initial_model.pt"
 
         out_dir_exists = out_dir.exists()
-        model_exists = model_path.exists()
-        loss_exists = loss_path.exists()
+        if run_config.ode_sol:
+            checkpoint_exists = (
+                ode_state_path.exists()
+                and ode_meta_path.exists()
+                and initial_model_path.exists()
+            )
+            checkpoint_description = f"ode_state_path={ode_state_path.exists()}"
+        else:
+            checkpoint_exists = model_path.exists()
+            checkpoint_description = f"model_path={checkpoint_exists}"
+        active_loss_path = ode_loss_path if run_config.ode_sol else loss_path
+        loss_exists = active_loss_path.exists()
         print(
             f"exists: out_dir={out_dir_exists} "
-            f"model_path={model_exists} loss_path={loss_exists}"
+            f"{checkpoint_description} loss_path={loss_exists}"
         )
 
         # if model isn't done (experiment isn't done), do experiment
         # skip otherwise
-        if model_exists and loss_exists:
+        if checkpoint_exists and loss_exists:
             print(f"skip: {out_dir}")
             continue
 
         # if partial run is done, erase past run data
         out_dir.mkdir(parents=True, exist_ok=True)
-        if loss_path.exists():
-            loss_path.unlink()
-        if model_path.exists():
-            model_path.unlink()
+        partial_outputs = (
+            ode_loss_path,
+            ode_state_path,
+            ode_meta_path,
+            initial_model_path,
+        ) if run_config.ode_sol else (loss_path, model_path)
+        for partial_output in partial_outputs:
+            if partial_output.exists():
+                partial_output.unlink()
 
         set_seed(seed)
 
-        # setting up datasets and covariance matrices
+        # Initialize before touching a DataLoader so SGD and ODE configurations
+        # with the same seed start from exactly the same weights.
+        model = AutoEncoder(config=run_config)
+
         dm = DataManager(seed, run_config)
+
+        if run_config.ode_sol:
+            omega, _, eigenvalues, eigenvectors = dm.get_ode_statistics()
+            torch.save(model.state_dict(), initial_model_path)
+
+            with ode_loss_path.open("w", encoding="utf-8") as loss_file:
+                def write_ode_sample(sample: ODESample) -> None:
+                    row = {
+                        "step": int(round(sample.alpha * run_config.D)),
+                        "alpha": sample.alpha,
+                        "generalization_error": sample.generalization_error,
+                    }
+                    loss_file.write(json.dumps(row) + "\n")
+
+                ode_result = solve_ode_from_model(
+                    model=model,
+                    eigenvalues=eigenvalues,
+                    eigenvectors=eigenvectors,
+                    integral=integral,
+                    learning_rate=run_config.learning_rate,
+                    alpha_end=float(run_config.alpha),
+                    sample_step=ODE_RESULT_ALPHA_STEP,
+                    on_sample=write_ode_sample,
+                )
+
+            np.savez_compressed(
+                ode_state_path,
+                q=ode_result.final_state.q,
+                r=ode_result.final_state.r,
+                t=ode_result.final_state.t,
+                T0=ode_result.final_state.T0,
+                eigenvalues=eigenvalues,
+                alpha=np.asarray(ode_result.final_alpha),
+            )
+            ode_metadata = {
+                "method": "RK45",
+                "requested_alpha_end": float(run_config.alpha),
+                "minimum_alpha_end": MIN_ODE_ALPHA,
+                "max_rk45_alpha_step": MAX_RK45_ALPHA_STEP,
+                "result_alpha_step": ode_result.sample_step,
+                "rtol": ode_result.rtol,
+                "atol": ode_result.atol,
+                "nfev": ode_result.nfev,
+                "accepted_steps": ode_result.accepted_steps,
+                "emitted_samples": ode_result.emitted_samples,
+                "final_alpha": ode_result.final_alpha,
+                "covariance_trace": float(np.trace(omega)),
+            }
+            ode_meta_path.write_text(
+                json.dumps(ode_metadata, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            print(f"saved: {ode_state_path}")
+            continue
+
+        # Setting up datasets and covariance matrices for the SGD path.
         trainloader, (omega, _, _, _) = dm.get_trainloader()
         testloader, (omega_test, _, _, _) = dm.get_testloader()
         
         if not run_config.test_loss:
             testloader = None
 
-        model = AutoEncoder(config=run_config).to(device)
+        model = model.to(device)
 
     
         # scaling learning rate

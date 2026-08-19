@@ -2,41 +2,41 @@
 set -euo pipefail
 
 configs=(
-  configs/erf/initialization/erf_cifar_init_std=0.5_k=3.yaml
-  configs/erf/initialization/erf_cifar_init_uniform_k=3.yaml
-  configs/erf/initialization/erf_cifar_init_unit_sphere_scale=0.1_k=3.yaml
-  configs/erf/initialization/erf_cifar_init_unit_sphere_scale=0.5_k=3.yaml
-  configs/erf/initialization/erf_cifar_init_unit_sphere_scale=1_k=3.yaml
-  configs/erf/initialization/erf_cifar_init_unit_sphere_scale=2_k=3.yaml
-  configs/erf/initialization/erf_cifar_init_unit_sphere_scale=5_k=3.yaml
-  configs/gelu/initialization/gelu_cifar_init_std=0.5_k=3.yaml
-  configs/gelu/initialization/gelu_cifar_init_uniform_k=3.yaml
-  configs/gelu/initialization/gelu_cifar_init_unit_sphere_scale=0.1_k=3.yaml
-  configs/gelu/initialization/gelu_cifar_init_unit_sphere_scale=0.5_k=3.yaml
-  configs/gelu/initialization/gelu_cifar_init_unit_sphere_scale=1_k=3.yaml
-  configs/gelu/initialization/gelu_cifar_init_unit_sphere_scale=2_k=3.yaml
-  configs/gelu/initialization/gelu_cifar_init_unit_sphere_scale=5_k=3.yaml
-  configs/relu/initialization/relu_cifar_init_std=0.5_k=3.yaml
-  configs/relu/initialization/relu_cifar_init_uniform_k=3.yaml
-  configs/relu/initialization/relu_cifar_init_unit_sphere_scale=0.1_k=3.yaml
-  configs/relu/initialization/relu_cifar_init_unit_sphere_scale=0.5_k=3.yaml
-  configs/relu/initialization/relu_cifar_init_unit_sphere_scale=1_k=3.yaml
-  configs/relu/initialization/relu_cifar_init_unit_sphere_scale=2_k=3.yaml
-  configs/relu/initialization/relu_cifar_init_unit_sphere_scale=5_k=3.yaml
-  configs/h1/initialization/h1_cifar_init_std=0.5_k=3.yaml
-  configs/h1/initialization/h1_cifar_init_uniform_k=3.yaml
-  configs/h1/initialization/h1_cifar_init_unit_sphere_scale=0.1_k=3.yaml
-  configs/h1/initialization/h1_cifar_init_unit_sphere_scale=0.5_k=3.yaml
-  configs/h1/initialization/h1_cifar_init_unit_sphere_scale=1_k=3.yaml
-  configs/h1/initialization/h1_cifar_init_unit_sphere_scale=2_k=3.yaml
-  configs/h1/initialization/h1_cifar_init_unit_sphere_scale=5_k=3.yaml
-  configs/h3/initialization/h3_cifar_init_std=0.5_k=3.yaml
-  configs/h3/initialization/h3_cifar_init_uniform_k=3.yaml
-  configs/h3/initialization/h3_cifar_init_unit_sphere_scale=0.1_k=3.yaml
-  configs/h3/initialization/h3_cifar_init_unit_sphere_scale=0.5_k=3.yaml
-  configs/h3/initialization/h3_cifar_init_unit_sphere_scale=1_k=3.yaml
-  configs/h3/initialization/h3_cifar_init_unit_sphere_scale=2_k=3.yaml
-  configs/h3/initialization/h3_cifar_init_unit_sphere_scale=5_k=3.yaml
+  configs/erf/erf_cifar_init_std=0.5_k=3.yaml
+  configs/erf/erf_cifar_init_uniform_k=3.yaml
+  configs/erf/erf_cifar_init_unit_sphere_scale=0.1_k=3.yaml
+  configs/erf/erf_cifar_init_unit_sphere_scale=0.5_k=3.yaml
+  configs/erf/erf_cifar_init_unit_sphere_scale=1_k=3.yaml
+  configs/erf/erf_cifar_init_unit_sphere_scale=2_k=3.yaml
+  configs/erf/erf_cifar_init_unit_sphere_scale=5_k=3.yaml
+  configs/gelu/gelu_cifar_init_std=0.5_k=3.yaml
+  configs/gelu/gelu_cifar_init_uniform_k=3.yaml
+  configs/gelu/gelu_cifar_init_unit_sphere_scale=0.1_k=3.yaml
+  configs/gelu/gelu_cifar_init_unit_sphere_scale=0.5_k=3.yaml
+  configs/gelu/gelu_cifar_init_unit_sphere_scale=1_k=3.yaml
+  configs/gelu/gelu_cifar_init_unit_sphere_scale=2_k=3.yaml
+  configs/gelu/gelu_cifar_init_unit_sphere_scale=5_k=3.yaml
+  configs/relu/relu_cifar_init_std=0.5_k=3.yaml
+  configs/relu/relu_cifar_init_uniform_k=3.yaml
+  configs/relu/relu_cifar_init_unit_sphere_scale=0.1_k=3.yaml
+  configs/relu/relu_cifar_init_unit_sphere_scale=0.5_k=3.yaml
+  configs/relu/relu_cifar_init_unit_sphere_scale=1_k=3.yaml
+  configs/relu/relu_cifar_init_unit_sphere_scale=2_k=3.yaml
+  configs/relu/relu_cifar_init_unit_sphere_scale=5_k=3.yaml
+  configs/h1/h1_cifar_init_std=0.5_k=3.yaml
+  configs/h1/h1_cifar_init_uniform_k=3.yaml
+  configs/h1/h1_cifar_init_unit_sphere_scale=0.1_k=3.yaml
+  configs/h1/h1_cifar_init_unit_sphere_scale=0.5_k=3.yaml
+  configs/h1/h1_cifar_init_unit_sphere_scale=1_k=3.yaml
+  configs/h1/h1_cifar_init_unit_sphere_scale=2_k=3.yaml
+  configs/h1/h1_cifar_init_unit_sphere_scale=5_k=3.yaml
+  configs/h3/h3_cifar_init_std=0.5_k=3.yaml
+  configs/h3/h3_cifar_init_uniform_k=3.yaml
+  configs/h3/h3_cifar_init_unit_sphere_scale=0.1_k=3.yaml
+  configs/h3/h3_cifar_init_unit_sphere_scale=0.5_k=3.yaml
+  configs/h3/h3_cifar_init_unit_sphere_scale=1_k=3.yaml
+  configs/h3/h3_cifar_init_unit_sphere_scale=2_k=3.yaml
+  configs/h3/h3_cifar_init_unit_sphere_scale=5_k=3.yaml
   
 )
 

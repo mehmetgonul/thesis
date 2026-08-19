@@ -2,10 +2,10 @@
 set -euo pipefail
 
 configs=(
-  configs/relu/bias/relu_cifar_bias.yaml
-  configs/relu/bias/no_bias.yaml
-  configs/gelu/bias/gelu_cifar_bias.yaml
-  configs/gelu/bias/no_bias.yaml
+  configs/relu/relu_cifar_bias.yaml
+  configs/relu/no_bias.yaml
+  configs/gelu/gelu_cifar_bias.yaml
+  configs/gelu/no_bias.yaml
 
 )
 
