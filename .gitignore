@@ -28,7 +28,7 @@ MANIFEST
 local/
 data/
 *.png
-
+tests
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
@@ -127,7 +127,7 @@ ipython_config.py
 
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
 __pypackages__/
-
+plots
 # Celery stuff
 celerybeat-schedule
 celerybeat.pid

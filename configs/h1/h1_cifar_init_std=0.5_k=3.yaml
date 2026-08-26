@@ -1,4 +1,4 @@
-dataset: "cifar-10"
+dataset: "cifar-10_real"
 activation_function: "h1"
 tied: false
 bias: false

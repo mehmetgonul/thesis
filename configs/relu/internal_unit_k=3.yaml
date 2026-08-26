@@ -1,4 +1,4 @@
-dataset: "cifar-10"
+dataset: "cifar-10_gaussian"
 activation_function: "relu"
 tied: false
 bias: false
@@ -8,3 +8,4 @@ D: 1024
 K: 3
 init_std: 0.1
 ode_sol: true
+sgd: false

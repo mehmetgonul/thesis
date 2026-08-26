@@ -2,8 +2,8 @@
 
 The equations are adapted from the full-rank analytical updates in
 https://github.com/mariaref/NonLinearShallowAE.  A PyTorch model is used only
-to construct the initial order-parameter densities; all subsequent evolution
-is independent of the model and of SGD.
+to construct the initial spectral factors; all subsequent evolution is
+independent of the model and of SGD.
 """
 
 from __future__ import annotations
@@ -20,7 +20,8 @@ from src.integrals.integrals import Integral
 
 
 MIN_ODE_ALPHA = 1.0
-MAX_RK45_ALPHA_STEP = 1.0
+MAX_RK45_ALPHA_STEP = 1000.0
+FACTOR_NORM_FLOOR = 0
 
 
 @dataclass(frozen=True)
@@ -53,11 +54,41 @@ class ODEResult:
 SampleCallback = Callable[[ODESample], None]
 
 
-def initial_state_from_model(
+class _CachedIntegral:
+    """Cache moment evaluations within one state evaluation."""
+
+    def __init__(self, integral: Integral):
+        self.integral = integral
+        self.cache: dict[tuple[str, tuple[int, ...], bytes], float] = {}
+
+    def _evaluate(self, name: str, covariance: np.ndarray) -> float:
+        covariance = np.ascontiguousarray(covariance, dtype=np.float64)
+        key = (name, covariance.shape, covariance.tobytes())
+        if key not in self.cache:
+            self.cache[key] = float(getattr(self.integral, name)(covariance))
+        return self.cache[key]
+
+    def I2(self, covariance: np.ndarray) -> float:
+        return self._evaluate("I2", covariance)
+
+    def J2(self, covariance: np.ndarray) -> float:
+        return self._evaluate("J2", covariance)
+
+    def I21(self, covariance: np.ndarray) -> float:
+        return self._evaluate("I21", covariance)
+
+    def I22(self, covariance: np.ndarray) -> float:
+        return self._evaluate("I22", covariance)
+
+    def I3(self, covariance: np.ndarray) -> float:
+        return self._evaluate("I3", covariance)
+
+
+def factor_vector_from_model(
     model: AutoEncoder,
     eigenvectors: np.ndarray,
-) -> ODEState:
-    """Convert one initialized untied model into full-spectrum densities."""
+) -> np.ndarray:
+    """Convert one initialized untied model into spectral factors."""
 
     if model.tied:
         raise NotImplementedError("ODE mode currently requires tied: false")
@@ -70,7 +101,6 @@ def initial_state_from_model(
         .T.astype(np.float64, copy=True)
     )
     K, D = W.shape
-
     eigenvectors = np.asarray(eigenvectors, dtype=np.float64)
     if eigenvectors.shape != (D, D):
         raise ValueError(
@@ -79,14 +109,58 @@ def initial_state_from_model(
     if V.shape != (K, D):
         raise ValueError(f"Expected decoder weights with shape {(K, D)}, got {V.shape}")
 
-    W_eig = W @ eigenvectors
-    V_eig = V @ eigenvectors
+    encoder_factors = (W @ eigenvectors).T
+    decoder_factors = (V @ eigenvectors).T / np.sqrt(D)
+    factors = np.concatenate((encoder_factors, decoder_factors), axis=1)
+    if not np.all(np.isfinite(factors)):
+        raise FloatingPointError("Initial factor vector contains a non-finite value")
+    return np.ascontiguousarray(factors.reshape(-1))
 
-    q = np.einsum("kd,ld->kld", W_eig, W_eig)
-    r = np.einsum("kd,ld->kld", V_eig, W_eig) / np.sqrt(D)
-    t = np.einsum("kd,ld->kld", V_eig, V_eig) / D
-    T0 = V @ V.T / D
-    return ODEState(q=q, r=r, t=t, T0=T0)
+
+def _factor_matrix(vector: np.ndarray, K: int, D: int) -> np.ndarray:
+    vector = np.asarray(vector, dtype=np.float64)
+    expected_size = 2 * K * D
+    if vector.ndim != 1 or vector.size != expected_size:
+        raise ValueError(
+            f"Expected a flat factor state of size {expected_size}, got {vector.shape}"
+        )
+    if not np.all(np.isfinite(vector)):
+        raise FloatingPointError("Factor state contains a non-finite value")
+    return vector.reshape(D, 2 * K)
+
+
+def _state_from_factor_matrix(factors: np.ndarray, K: int) -> ODEState:
+    encoder_factors = factors[:, :K]
+    decoder_factors = factors[:, K:]
+    D = factors.shape[0]
+
+    # G_m = z_m z_m^T with z_m = [a_m; b_m].
+    q = np.empty((K, K, D), dtype=np.float64)
+    r = np.empty((K, K, D), dtype=np.float64)
+    t = np.empty((K, K, D), dtype=np.float64)
+    np.einsum("dk,dl->kld", encoder_factors, encoder_factors, out=q)
+    np.einsum("dk,dl->kld", decoder_factors, encoder_factors, out=r)
+    np.einsum("dk,dl->kld", decoder_factors, decoder_factors, out=t)
+    return ODEState(q=q, r=r, t=t, T0=np.sum(t, axis=2))
+
+
+def state_from_factor_vector(vector: np.ndarray, K: int, D: int) -> ODEState:
+    """Reconstruct all density blocks from a flat factor state."""
+
+    return _state_from_factor_matrix(_factor_matrix(vector, K, D), K)
+
+
+def initial_state_from_model(
+    model: AutoEncoder,
+    eigenvectors: np.ndarray,
+) -> ODEState:
+    """Convert one initialized untied model into full-spectrum densities."""
+
+    K = model.hidden_size
+    D = model.input_size
+    return state_from_factor_vector(
+        factor_vector_from_model(model, eigenvectors), K, D
+    )
 
 
 def pack_state(state: ODEState) -> np.ndarray:
@@ -154,7 +228,22 @@ def generalization_error_from_state(
     """Evaluate the population reconstruction error represented by a state."""
 
     Q1, R1, T1 = order_parameters_from_state(state, eigenvalues, D)
+    return _generalization_error_from_order_parameters(
+        state.T0, Q1, R1, T1, eigenvalues, integral, D
+    )
+
+
+def _generalization_error_from_order_parameters(
+    T0: np.ndarray,
+    Q1: np.ndarray,
+    R1: np.ndarray,
+    T1: np.ndarray,
+    eigenvalues: np.ndarray,
+    integral: Integral,
+    D: int,
+) -> float:
     K = Q1.shape[0]
+    integral = _CachedIntegral(integral)
 
     error = 0.5 * float(np.sum(eigenvalues)) / D
     for k in range(K):
@@ -171,9 +260,35 @@ def generalization_error_from_state(
                 [[Q1[k, k], Q1[k, l]], [Q1[k, l], Q1[l, l]]],
                 dtype=np.float64,
             )
-            decoder_term += float(integral.I2(covariance)) * state.T0[k, l]
+            decoder_term += float(integral.I2(covariance)) * T0[k, l]
     error += 0.5 * decoder_term
     return float(error)
+
+
+def generalization_error_from_factor_vector(
+    vector: np.ndarray,
+    K: int,
+    D: int,
+    eigenvalues: np.ndarray,
+    integral: Integral,
+) -> float:
+    """Evaluate population error without reconstructing full densities."""
+
+    factors = _factor_matrix(vector, K, D)
+    eigenvalues = np.asarray(eigenvalues, dtype=np.float64)
+    if eigenvalues.shape != (D,):
+        raise ValueError(f"Expected {D} eigenvalues, got {eigenvalues.shape}")
+    encoder_factors = factors[:, :K]
+    decoder_factors = factors[:, K:]
+    weighted_encoder = eigenvalues[:, None] * encoder_factors
+    weighted_decoder = eigenvalues[:, None] * decoder_factors
+    Q1 = encoder_factors.T @ weighted_encoder / D
+    R1 = decoder_factors.T @ weighted_encoder / D
+    T1 = decoder_factors.T @ weighted_decoder / D
+    T0 = decoder_factors.T @ decoder_factors
+    return _generalization_error_from_order_parameters(
+        T0, Q1, R1, T1, eigenvalues, integral, D
+    )
 
 
 def _positive_denominator(value: float, label: str) -> float:
@@ -379,6 +494,8 @@ def ode_state_derivative(
     learning_rate: float,
     integral: Integral,
     D: int,
+    *,
+    derive_t0_from_t: bool = False,
 ) -> ODEState:
     """Evaluate all four full-spectrum derivatives from one common state."""
 
@@ -398,26 +515,40 @@ def ode_state_derivative(
         raise FloatingPointError("ODE state contains a non-finite value")
 
     Q1, R1, T1 = order_parameters_from_state(state, eigenvalues, D)
+    integral = _CachedIntegral(integral)
     dq = np.zeros_like(state.q)
     dr = np.zeros_like(state.r)
     dt = np.zeros_like(state.t)
-    dT0 = np.zeros_like(state.T0)
+    dT0 = None if derive_t0_from_t else np.zeros_like(state.T0)
 
     for k, l in combinations_with_replacement(range(K), 2):
         dq_kl = _dq_component(k, l, state, eigenvalues, Q1, R1, T1, integral)
-        dq_lk = _dq_component(l, k, state, eigenvalues, Q1, R1, T1, integral)
+        dq_lk = (
+            dq_kl
+            if k == l
+            else _dq_component(l, k, state, eigenvalues, Q1, R1, T1, integral)
+        )
         dq[k, l] = learning_rate * (dq_kl + dq_lk) / D
         dq[l, k] = dq[k, l]
 
         dt_kl = _dt_component(k, l, state, eigenvalues, Q1, integral, D)
-        dt_lk = _dt_component(l, k, state, eigenvalues, Q1, integral, D)
+        dt_lk = (
+            dt_kl
+            if k == l
+            else _dt_component(l, k, state, eigenvalues, Q1, integral, D)
+        )
         dt[k, l] = learning_rate * (dt_kl + dt_lk) / D
         dt[l, k] = dt[k, l]
 
-        dT0_kl = _dt0_component(k, l, state, Q1, R1, integral)
-        dT0_lk = _dt0_component(l, k, state, Q1, R1, integral)
-        dT0[k, l] = learning_rate * (dT0_kl + dT0_lk)
-        dT0[l, k] = dT0[k, l]
+        if dT0 is not None:
+            dT0_kl = _dt0_component(k, l, state, Q1, R1, integral)
+            dT0_lk = (
+                dT0_kl
+                if k == l
+                else _dt0_component(l, k, state, Q1, R1, integral)
+            )
+            dT0[k, l] = learning_rate * (dT0_kl + dT0_lk)
+            dT0[l, k] = dT0[k, l]
 
     for k in range(K):
         for l in range(K):
@@ -429,6 +560,8 @@ def ode_state_derivative(
             )
             dr[k, l] = learning_rate * (decoder_part + encoder_part)
 
+    if dT0 is None:
+        dT0 = np.sum(dt, axis=2)
     derivative = ODEState(q=dq, r=dr, t=dt, T0=dT0)
     if not all(
         np.all(np.isfinite(array))
@@ -436,6 +569,73 @@ def ode_state_derivative(
     ):
         raise FloatingPointError("ODE derivative contains a non-finite value")
     return derivative
+
+
+def factor_state_derivative(
+    vector: np.ndarray,
+    K: int,
+    D: int,
+    eigenvalues: np.ndarray,
+    learning_rate: float,
+    integral: Integral,
+    *,
+    norm_floor: float = FACTOR_NORM_FLOOR,
+) -> np.ndarray:
+    """Evaluate the full-spectrum ODE in factor coordinates."""
+
+    norm_floor = float(norm_floor)
+    if not np.isfinite(norm_floor) or norm_floor < 0.0:
+        raise ValueError("norm_floor must be finite and >= 0")
+
+    factors = _factor_matrix(vector, K, D)
+    encoder_factors = factors[:, :K]
+    decoder_factors = factors[:, K:]
+    squared_norm = np.einsum("di,di->d", factors, factors, optimize=True)
+    if np.any(squared_norm <= norm_floor):
+        mode = int(np.flatnonzero(squared_norm <= norm_floor)[0])
+        raise FloatingPointError(
+            f"Factor mode {mode} has squared norm {squared_norm[mode]:.6e}, "
+            f"below floor {norm_floor:.6e}"
+        )
+
+    state = _state_from_factor_matrix(factors, K)
+    density_derivative = ode_state_derivative(
+        state,
+        eigenvalues,
+        learning_rate,
+        integral,
+        D,
+        derive_t0_from_t=True,
+    )
+
+    # Apply H_m z_m without materializing each 2K x 2K block.
+    hz = np.empty_like(factors)
+    temporary = np.empty((D, K), dtype=np.float64)
+    np.einsum(
+        "kld,dl->dk", density_derivative.q, encoder_factors, out=hz[:, :K]
+    )
+    np.einsum(
+        "lkd,dl->dk", density_derivative.r, decoder_factors, out=temporary
+    )
+    hz[:, :K] += temporary
+    np.einsum(
+        "kld,dl->dk", density_derivative.r, encoder_factors, out=hz[:, K:]
+    )
+    np.einsum(
+        "kld,dl->dk", density_derivative.t, decoder_factors, out=temporary
+    )
+    hz[:, K:] += temporary
+
+    z_hz = np.einsum("di,di->d", factors, hz, optimize=True)
+
+    # dz = Hz/s - (z^T H z)z/(2s^2), where s = z^T z.
+    derivative = hz / squared_norm[:, None]
+    derivative -= (
+        z_hz / (2.0 * squared_norm**2)
+    )[:, None] * factors
+    if not np.all(np.isfinite(derivative)):
+        raise FloatingPointError("Factor derivative contains a non-finite value")
+    return np.ascontiguousarray(derivative.reshape(-1))
 
 
 def solve_ode_from_model(
@@ -450,12 +650,14 @@ def solve_ode_from_model(
     *,
     rtol: float = 1e-7,
     atol: float = 1e-9,
+    max_step: float = MAX_RK45_ALPHA_STEP,
+    factor_norm_floor: float = FACTOR_NORM_FLOOR,
 ) -> ODEResult:
     """Evolve an initialized model autonomously with adaptive RK45.
 
     ``sample_step`` controls only streamed output interpolation. It is not an
     integration step: RK45 chooses its own accepted steps from ``rtol`` and
-    ``atol``, capped at one alpha per accepted step. A non-negative
+    ``atol``, capped by ``max_step``. A non-negative
     ``alpha_end`` below one is promoted to one so every ODE call performs at
     least one full alpha of evolution.
     """
@@ -471,6 +673,9 @@ def solve_ode_from_model(
         raise ValueError("sample_step must be finite and > 0")
     if rtol <= 0.0 or atol <= 0.0:
         raise ValueError("rtol and atol must be > 0")
+    max_step = float(max_step)
+    if not np.isfinite(max_step) or max_step <= 0.0:
+        raise ValueError("max_step must be finite and > 0")
 
     eigenvalues = np.asarray(eigenvalues, dtype=np.float64)
     D = model.input_size
@@ -478,14 +683,14 @@ def solve_ode_from_model(
     if eigenvalues.shape != (D,):
         raise ValueError(f"Expected {D} eigenvalues, got {eigenvalues.shape}")
 
-    initial_state = initial_state_from_model(model, eigenvectors)
-    initial_vector = pack_state(initial_state)
+    initial_vector = factor_vector_from_model(model, eigenvectors)
     emitted_samples = 0
 
     def emit(alpha: float, vector: np.ndarray) -> None:
         nonlocal emitted_samples
-        state = unpack_state(vector, K, D)
-        error = generalization_error_from_state(state, eigenvalues, integral, D)
+        error = generalization_error_from_factor_vector(
+            vector, K, D, eigenvalues, integral
+        )
         if not np.isfinite(error):
             raise FloatingPointError(
                 f"Generalization error became non-finite at alpha={alpha}"
@@ -497,9 +702,14 @@ def solve_ode_from_model(
     emit(0.0, initial_vector)
 
     def rhs(_alpha: float, vector: np.ndarray) -> np.ndarray:
-        state = unpack_state(vector, K, D)
-        return pack_state(
-            ode_state_derivative(state, eigenvalues, learning_rate, integral, D)
+        return factor_state_derivative(
+            vector,
+            K,
+            D,
+            eigenvalues,
+            learning_rate,
+            integral,
+            norm_floor=factor_norm_floor,
         )
 
     solver = RK45(
@@ -507,7 +717,7 @@ def solve_ode_from_model(
         t0=0.0,
         y0=initial_vector,
         t_bound=float(alpha_end),
-        max_step=MAX_RK45_ALPHA_STEP,
+        max_step=max_step,
         rtol=rtol,
         atol=atol,
     )
@@ -536,16 +746,16 @@ def solve_ode_from_model(
             last_emitted_alpha = sample_alpha
             sample_index += 1
 
-    if last_emitted_alpha < alpha_end - time_tolerance:
+    if last_emitted_alpha != alpha_end:
         emit(alpha_end, solver.y)
 
     return ODEResult(
-        final_state=unpack_state(solver.y, K, D, copy=True),
+        final_state=state_from_factor_vector(solver.y, K, D),
         final_alpha=float(solver.t),
         nfev=int(solver.nfev),
         accepted_steps=accepted_steps,
         emitted_samples=emitted_samples,
-        max_step=MAX_RK45_ALPHA_STEP,
+        max_step=max_step,
         sample_step=sample_step,
         rtol=rtol,
         atol=atol,

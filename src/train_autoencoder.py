@@ -10,13 +10,16 @@ import torch
 from torch import nn, optim
 
 from src.autoencoder import AutoEncoder
-from src.config import parse_config
+from src.config import parse_config, resolve_run_modes
 from src.data_manager import DataManager
-from src.hash import make_hash
+from src.hash import (
+    ODE_INTEGRATION_COORDINATES,
+    is_current_ode_metadata,
+    make_hash,
+)
 from src.integrals import analytical_integral_factory
 from src.integrals.hermite_series_integrals import HermiteWrapper
 from src.ode_solver import (
-    MAX_RK45_ALPHA_STEP,
     MIN_ODE_ALPHA,
     ODESample,
     solve_ode_from_model,
@@ -29,7 +32,7 @@ from src.utils import set_seed
 
 
 
-SEEDS = [40, 41, 42]
+SEEDS = [42]
 HERMITE_ACTIVATIONS = {"h1", "h2", "h3", "h4", "h5", "h6"}
 ODE_RESULT_ALPHA_STEP = 1.0
 
@@ -140,26 +143,34 @@ def main() -> None:
 
     run_config = parse_config(args.config)
 
-    if run_config.ode_sol and (run_config.tied or run_config.bias):
+    ode_requested = run_config.ode_sol
+    ode_supported = not run_config.tied and not run_config.bias
+    run_sgd, run_ode = resolve_run_modes(
+        run_config,
+        ode_supported=ode_supported,
+    )
+
+    if ode_requested and not ode_supported:
         reasons = []
         if run_config.tied:
             reasons.append("tied: true")
         if run_config.bias:
             reasons.append("bias: true")
-        print(
-            "ode_sol: true is unsupported with "
-            + ", ".join(reasons)
-            + "; overriding ode_sol to false and running online SGD"
-        )
-        run_config.ode_sol = False
+        message = "ode_sol: true is unsupported with " + ", ".join(reasons)
+        if not run_sgd:
+            raise ValueError(message + "; enable sgd or use an untied, unbiased model")
+        print(message + "; skipping ODE and running online SGD")
 
-    if run_config.ode_sol and run_config.test_loss:
+    if not run_sgd and not run_ode:
+        raise ValueError("At least one of sgd or ode_sol must be enabled")
+
+    if run_ode and not run_sgd and run_config.test_loss:
         print(
             "warning: test_loss is ignored in ODE mode because no final "
             "PyTorch model is evolved"
         )
 
-    if run_config.ode_sol and 0.0 <= float(run_config.alpha) < MIN_ODE_ALPHA:
+    if run_ode and 0.0 <= float(run_config.alpha) < MIN_ODE_ALPHA:
         print(
             f"ODE alpha={run_config.alpha} is below the minimum horizon; "
             f"solving through alpha={MIN_ODE_ALPHA:g}"
@@ -178,37 +189,36 @@ def main() -> None:
         initial_model_path = out_dir / "initial_model.pt"
 
         out_dir_exists = out_dir.exists()
-        if run_config.ode_sol:
-            checkpoint_exists = (
-                ode_state_path.exists()
-                and ode_meta_path.exists()
-                and initial_model_path.exists()
-            )
-            checkpoint_description = f"ode_state_path={ode_state_path.exists()}"
-        else:
-            checkpoint_exists = model_path.exists()
-            checkpoint_description = f"model_path={checkpoint_exists}"
-        active_loss_path = ode_loss_path if run_config.ode_sol else loss_path
-        loss_exists = active_loss_path.exists()
+        ode_complete = (
+            ode_state_path.exists()
+            and ode_loss_path.exists()
+            and ode_meta_path.exists()
+            and initial_model_path.exists()
+            and is_current_ode_metadata(ode_meta_path)
+        )
+        sgd_complete = model_path.exists() and loss_path.exists()
+        statuses = []
+        if run_ode:
+            statuses.append(f"ode_complete={ode_complete}")
+        if run_sgd:
+            statuses.append(f"sgd_complete={sgd_complete}")
         print(
             f"exists: out_dir={out_dir_exists} "
-            f"{checkpoint_description} loss_path={loss_exists}"
+            + " ".join(statuses)
         )
 
-        # if model isn't done (experiment isn't done), do experiment
-        # skip otherwise
-        if checkpoint_exists and loss_exists:
+        if (not run_ode or ode_complete) and (not run_sgd or sgd_complete):
             print(f"skip: {out_dir}")
             continue
 
-        # if partial run is done, erase past run data
         out_dir.mkdir(parents=True, exist_ok=True)
-        partial_outputs = (
-            ode_loss_path,
-            ode_state_path,
-            ode_meta_path,
-            initial_model_path,
-        ) if run_config.ode_sol else (loss_path, model_path)
+        partial_outputs = []
+        if run_ode and not ode_complete:
+            partial_outputs.extend(
+                [ode_loss_path, ode_state_path, ode_meta_path, initial_model_path]
+            )
+        if run_sgd and not sgd_complete:
+            partial_outputs.extend([loss_path, model_path])
         for partial_output in partial_outputs:
             if partial_output.exists():
                 partial_output.unlink()
@@ -221,7 +231,7 @@ def main() -> None:
 
         dm = DataManager(seed, run_config)
 
-        if run_config.ode_sol:
+        if run_ode and not ode_complete:
             omega, _, eigenvalues, eigenvectors = dm.get_ode_statistics()
             torch.save(model.state_dict(), initial_model_path)
 
@@ -256,9 +266,10 @@ def main() -> None:
             )
             ode_metadata = {
                 "method": "RK45",
+                "integration_coordinates": ODE_INTEGRATION_COORDINATES,
                 "requested_alpha_end": float(run_config.alpha),
                 "minimum_alpha_end": MIN_ODE_ALPHA,
-                "max_rk45_alpha_step": MAX_RK45_ALPHA_STEP,
+                "max_rk45_alpha_step": ode_result.max_step,
                 "result_alpha_step": ode_result.sample_step,
                 "rtol": ode_result.rtol,
                 "atol": ode_result.atol,
@@ -273,6 +284,8 @@ def main() -> None:
                 encoding="utf-8",
             )
             print(f"saved: {ode_state_path}")
+
+        if not run_sgd or sgd_complete:
             continue
 
         # Setting up datasets and covariance matrices for the SGD path.

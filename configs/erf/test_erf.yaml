@@ -1,0 +1,11 @@
+dataset: "cifar-10_gaussian"
+activation_function: "erf"
+tied: false
+bias: false
+alpha: 100
+learning_rate: 1.0
+D: 1024
+K: 100
+init_std: 0.1
+ode_sol: true
+sgd: false

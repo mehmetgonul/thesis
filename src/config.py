@@ -8,7 +8,7 @@ from typing import get_origin, get_args, Union, Any
 
 @dataclass(frozen=False)
 class RunConfig:
-    dataset: str # "cifar-10" 
+    dataset: str # "cifar-10_gaussian" | "cifar-10_real" | "fashion_mnist"
     activation_function: str # "erf" | "relu" | "gelu" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
     tied: bool
     bias: bool
@@ -24,10 +24,29 @@ class RunConfig:
     N: Optional[int] = None # The degree of approximation when hermite is used
     test_loss: bool = False
     ode_sol: bool = False
-    
-    
-    
-    
+    sgd: Optional[bool] = None
+
+
+def resolve_run_modes(
+    run_config: RunConfig | dict,
+    *,
+    ode_supported: bool = True,
+) -> tuple[bool, bool]:
+    """Return ``(run_sgd, run_ode)`` with legacy defaults preserved."""
+
+    if isinstance(run_config, dict):
+        ode_requested = bool(run_config.get("ode_sol", False))
+        sgd_setting = run_config.get("sgd")
+    else:
+        ode_requested = bool(run_config.ode_sol)
+        sgd_setting = run_config.sgd
+
+    run_sgd = not ode_requested if sgd_setting is None else bool(sgd_setting)
+    if ode_requested and not ode_supported and sgd_setting is None:
+        run_sgd = True
+    return run_sgd, ode_requested and ode_supported
+
+
 def _unwrap_optional(annotation):
     """Optional[T] | Union[T, NoneType]  →  T"""
     origin = get_origin(annotation)

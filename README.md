@@ -23,6 +23,12 @@ python -m pip install -r requirements.txt
 
 The required dataset is downloaded automatically into `data/` the first time an experiment is run, so no manual dataset setup is needed.
 
+Use `dataset: "cifar-10_gaussian"` for online SGD with a fresh Gaussian
+sample at every update. The Gaussian covariance, and the covariance evolved by
+the ODE, are computed from the 10,000 grayscale CIFAR-10 test images. Use
+`dataset: "cifar-10_real"` to train SGD on the actual grayscale CIFAR-10
+training images; the loader reshuffles them whenever it starts a new pass.
+
 ## Run an experiment
 
 Each Bash file in the repository root represents one set of experiments from the thesis. For example:
@@ -39,6 +45,7 @@ Set the following flag in an experiment config:
 
 ```yaml
 ode_sol: true
+sgd: false
 ```
 
 Then use the normal autoencoder entry point:
@@ -47,13 +54,15 @@ Then use the normal autoencoder entry point:
 python -m src.train_autoencoder path/to/config.yaml
 ```
 
-ODE mode initializes the configured autoencoder once and evolves its full-spectrum order parameters independently with adaptive RK45. It does not run SGD or keep the analytical state aligned to a PyTorch model. The current implementation requires `tied: false` and `bias: false`; `test_loss` is ignored because ODE mode does not evolve a final PyTorch model.
+`ode_sol` and `sgd` independently select the two run modes. Use `ode_sol: true` with `sgd: false` for ODE only, or set both to `true` to produce both results from the same seeded initialization. If `sgd` is omitted, existing behavior is preserved: ODE configurations run only ODE, while other configurations run SGD.
+
+ODE mode initializes the configured autoencoder once and evolves full-spectrum rank-one factors independently with adaptive RK45. Density order parameters are reconstructed from those factors at every RK stage. It does not keep the analytical state aligned to a PyTorch model. The current implementation requires `tied: false` and `bias: false`; `test_loss` is ignored during an ODE-only run because no final PyTorch model is evolved.
 
 Every ODE run evolves through at least `alpha: 1`. If a non-negative value below one is configured, RK45 extends the endpoint to one and the trainer prints the override; online SGD continues to use the configured value unchanged. RK45 is limited to at most one alpha per accepted integration step, while remaining free to take smaller steps for accuracy. `ode_loss.jsonl` contains the generalization error at `alpha = 0, 1, 2, ...` through the configured endpoint.
 
-`ode_sol` is excluded from the experiment hash. This lets online and ODE results coexist under the same seed directory: online mode uses `model.pt` and `loss.jsonl`, while ODE mode uses `initial_model.pt`, `ode_loss.jsonl`, `ode_state.npz`, and `ode_meta.json`. Running the other mode later adds its missing artifacts without overwriting the completed mode.
+`ode_sol` and `sgd` are excluded from the experiment hash. This lets online and ODE results coexist under the same seed directory: online mode uses `model.pt` and `loss.jsonl`, while ODE mode uses `initial_model.pt`, `ode_loss.jsonl`, `ode_state.npz`, and `ode_meta.json`. ODE metadata records the integration-coordinate version so legacy raw-density results are recomputed. Running the other mode later adds its missing artifacts without overwriting the completed mode.
 
-If `tied: true` or `bias: true` is configured together with `ode_sol: true`, the trainer prints an explanation, overrides `ode_sol` to `false` before hashing, and runs online SGD. ODE mode does not save a final `model.pt`, because its final order parameters do not uniquely determine model weights.
+If `tied: true` or `bias: true` is configured together with `ode_sol: true`, the trainer skips the unsupported ODE mode when SGD is enabled. An explicit ODE-only configuration fails with an explanation. ODE mode does not save a final `model.pt`, because its final order parameters do not uniquely determine model weights.
 
 ## Generate plots
 

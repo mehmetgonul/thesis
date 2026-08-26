@@ -5,6 +5,23 @@ import json
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
+from src.config import resolve_run_modes
+
+
+ODE_INTEGRATION_COORDINATES = "rank_one_factor_v1"
+
+
+def is_current_ode_metadata(path: Path) -> bool:
+    try:
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(metadata, dict)
+        and metadata.get("integration_coordinates")
+        == ODE_INTEGRATION_COORDINATES
+    )
+
 
 def _to_dict(value):
     payload = asdict(value) if is_dataclass(value) else value
@@ -26,6 +43,7 @@ def _to_dict(value):
         # The solver selects which artifact is produced, not the identity of
         # the experiment. Online and ODE results therefore share one hash.
         payload.pop("ode_sol", None)
+        payload.pop("sgd", None)
         
     return payload
 
@@ -51,21 +69,35 @@ def check_hash(run_config=None, seed=None, artifacts_dir=Path("artifacts")):
     run_hash = make_hash(run_config=run_config)
     base = artifacts_dir / run_hash / "autoencoder" / f"seed_{seed}"
     if isinstance(run_config, dict):
-        ode_sol = bool(run_config.get("ode_sol", False))
         tied = bool(run_config.get("tied", False))
         bias = bool(run_config.get("bias", False))
     else:
-        ode_sol = bool(getattr(run_config, "ode_sol", False))
         tied = bool(getattr(run_config, "tied", False))
         bias = bool(getattr(run_config, "bias", False))
-    ode_sol = ode_sol and not tied and not bias
-    checkpoint = base / ("ode_state.npz" if ode_sol else "model.pt")
-    results = base / ("ode_loss.jsonl" if ode_sol else "loss.jsonl")
-    required = [checkpoint, results]
-    if ode_sol:
-        required.extend([base / "ode_meta.json", base / "initial_model.pt"])
-    return (
-        (str(checkpoint), str(results))
-        if all(path.is_file() for path in required)
-        else None
+    run_sgd, run_ode = resolve_run_modes(
+        run_config,
+        ode_supported=not tied and not bias,
     )
+    if not run_sgd and not run_ode:
+        return None
+
+    model_path = base / "model.pt"
+    loss_path = base / "loss.jsonl"
+    ode_state_path = base / "ode_state.npz"
+    ode_loss_path = base / "ode_loss.jsonl"
+    required = []
+    if run_sgd:
+        required.extend([model_path, loss_path])
+    metadata = None
+    if run_ode:
+        metadata = base / "ode_meta.json"
+        required.extend(
+            [ode_state_path, ode_loss_path, metadata, base / "initial_model.pt"]
+        )
+    if not all(path.is_file() for path in required):
+        return None
+    if metadata is not None and not is_current_ode_metadata(metadata):
+        return None
+    if run_sgd:
+        return str(model_path), str(loss_path)
+    return str(ode_state_path), str(ode_loss_path)

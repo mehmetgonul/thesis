@@ -2,7 +2,33 @@ import torch
 from src.config import RunConfig
 from torchvision import transforms, datasets
 import numpy as np
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+
+
+CIFAR10_GAUSSIAN = "cifar-10_gaussian"
+CIFAR10_REAL = "cifar-10_real"
+CIFAR10_DATASETS = {CIFAR10_GAUSSIAN, CIFAR10_REAL}
+
+
+class GaussianCovarianceDataset(Dataset):
+    """Draw fresh Gaussian inputs lazily from a fixed covariance."""
+
+    def __init__(self, num_samples, sqrt_omega, seed):
+        self.num_samples = int(num_samples)
+        self.sqrt_omega = torch.as_tensor(sqrt_omega, dtype=torch.float32)
+        self.generator = torch.Generator().manual_seed(int(seed))
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, _index):
+        z = torch.randn(
+            self.sqrt_omega.shape[0],
+            generator=self.generator,
+            dtype=self.sqrt_omega.dtype,
+        )
+        return z @ self.sqrt_omega, 0
+
 
 class DataManager:
     
@@ -41,6 +67,19 @@ class DataManager:
         return dataset
     
     def get_trainloader(self):
+
+        if self.dataset == CIFAR10_GAUSSIAN:
+            _, statistics = self.get_testloader()
+            gaussian_set = GaussianCovarianceDataset(
+                num_samples=self.D * self.alpha,
+                sqrt_omega=statistics[1],
+                seed=self.seed,
+            )
+            return DataLoader(
+                gaussian_set,
+                batch_size=1,
+                shuffle=False,
+            ), statistics
         
         if self.dataset == "fashion_mnist":
             input_transforms = transforms.Compose([transforms.ToTensor()])
@@ -48,7 +87,7 @@ class DataManager:
                                 download=True, 
                                 transform=input_transforms)
         
-        elif self.dataset == "cifar-10":
+        elif self.dataset == CIFAR10_REAL:
             input_transforms = transforms.Compose([transforms.Grayscale(),
                                        transforms.ToTensor()])
             trainset = datasets.CIFAR10(root="./data/cifar-10/", train=True,
@@ -60,6 +99,15 @@ class DataManager:
         
         trainset = self._preprocess_data(trainset)
         omega, sqrt_omega, eigenvalues, eigenvectors = self._compute_covariance(trainset)
+
+        if self.dataset == CIFAR10_REAL:
+            generator = torch.Generator().manual_seed(self.seed)
+            return DataLoader(
+                trainset,
+                batch_size=1,
+                shuffle=True,
+                generator=generator,
+            ), (omega, sqrt_omega, eigenvalues, eigenvectors)
 
         loader = DataLoader(trainset, batch_size=len(trainset), shuffle=False)
         xs, _ = next(iter(loader))
@@ -90,7 +138,7 @@ class DataManager:
 
 
     def get_ode_statistics(self):
-        """Return the full training covariance spectrum without making samples."""
+        """Return the reference covariance spectrum without making samples."""
 
         if self.dataset == "fashion_mnist":
             input_transforms = transforms.Compose([transforms.ToTensor()])
@@ -100,13 +148,13 @@ class DataManager:
                 download=True,
                 transform=input_transforms,
             )
-        elif self.dataset == "cifar-10":
+        elif self.dataset in CIFAR10_DATASETS:
             input_transforms = transforms.Compose(
                 [transforms.Grayscale(), transforms.ToTensor()]
             )
             trainset = datasets.CIFAR10(
                 root="./data/cifar-10/",
-                train=True,
+                train=False,
                 download=True,
                 transform=input_transforms,
             )
@@ -128,7 +176,7 @@ class DataManager:
                                 download=True, 
                                 transform=input_transforms)
         
-        elif self.dataset == "cifar-10":
+        elif self.dataset in CIFAR10_DATASETS:
             input_transforms = transforms.Compose([transforms.Grayscale(),
                                         transforms.ToTensor()])
             testset = datasets.CIFAR10(root="./data/cifar-10/", train=False,
@@ -179,7 +227,7 @@ class DataManager:
             trainset = datasets.FashionMNIST(root="./data/fashionMNIST", train=True,
                                 download=True,
                                 transform=input_transforms)
-        elif self.dataset == "cifar-10":
+        elif self.dataset in CIFAR10_DATASETS:
             input_transforms = transforms.Compose([transforms.Grayscale(),
                                        transforms.ToTensor()])
             trainset = datasets.CIFAR10(root="./data/cifar-10/", train=False,
