@@ -61,6 +61,28 @@ def compute_order_parameters_from_weights(model: AutoEncoder, omega):
     
     return T1, Q1, R1, T0, Q0, R0
 
+
+def normalize_order_parameters(order_parameters):
+    """Return correlation-normalized copies as lists; zero norms become null."""
+    normalized = {}
+    for suffix in ("0", "1"):
+        q_std = np.sqrt(np.maximum(np.diag(order_parameters[f"Q{suffix}"]), 0))
+        t_std = np.sqrt(np.maximum(np.diag(order_parameters[f"T{suffix}"]), 0))
+        for name, left, right in (
+            (f"Q{suffix}", q_std, q_std),
+            (f"T{suffix}", t_std, t_std),
+            (f"R{suffix}", t_std, q_std),
+        ):
+            denominator = np.outer(left, right)
+            valid = denominator > 0
+            values = np.divide(
+                order_parameters[name], denominator,
+                out=np.zeros_like(denominator), where=valid,
+            )
+            normalized[f"{name}_normalized"] = np.where(valid, values, None).tolist()
+    return normalized
+
+
 def test_error_with_order_parameters(T0, T1, Q1, R1, omega, integral: Integral):
     ## taken from NonLinearShallowAE
     
@@ -236,6 +258,7 @@ def main() -> None:
                         name: sample.order_parameters[name].tolist()
                         for name in ORDER_PARAMETER_NAMES
                     })
+                    row.update(normalize_order_parameters(sample.order_parameters))
                     loss_file.write(json.dumps(row, allow_nan=False) + "\n")
 
                 ode_result = solve_ode_from_model(
@@ -364,6 +387,7 @@ def main() -> None:
                         name: matrix.tolist()
                         for name, matrix in order_parameters.items()
                     })
+                    row.update(normalize_order_parameters(order_parameters))
                 if test_loss is not None:
                     row["test_loss"] = float(test_loss)
                 if model.encoder.bias is not None:
