@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
@@ -13,36 +14,29 @@ from src.autoencoder import AutoEncoder
 from src.config import parse_config, resolve_run_modes
 from src.data_manager import DataManager
 from src.hash import (
+    INTEGRAL_VERSIONS,
     ODE_INTEGRATION_COORDINATES,
+    ODE_ORDER_PARAMETER_LOGGING_VERSION,
     is_current_ode_metadata,
     make_hash,
 )
-from src.integrals import analytical_integral_factory
-from src.integrals.hermite_series_integrals import HermiteWrapper
+from src.integrals import Integral, integral_for_activation
 from src.ode_solver import (
     MIN_ODE_ALPHA,
+    ORDER_PARAMETER_NAMES,
     ODESample,
     solve_ode_from_model,
 )
 
 from itertools import product
 
-from src.integrals.integrals import Integral
 from src.utils import set_seed
 
 
 
-SEEDS = [42]
-HERMITE_ACTIVATIONS = {"h1", "h2", "h3", "h4", "h5", "h6"}
+SEEDS = [43]
 ODE_RESULT_ALPHA_STEP = 1.0
 
-
-def integral_for_activation(activation_function: str, N: int | None = None):
-    activation_function = activation_function.lower()
-    if activation_function in HERMITE_ACTIVATIONS:
-        degree = int(activation_function[1:])
-        return HermiteWrapper(activation_function, N=max(N or degree, degree))
-    return analytical_integral_factory(activation_function)
 
 def compute_order_parameters_from_weights(model: AutoEncoder, omega):
     W = model.encoder.weight.data.detach().cpu().numpy()
@@ -90,7 +84,7 @@ def test_error_with_order_parameters(T0, T1, Q1, R1, omega, integral: Integral):
 
 
     I2m = np.asarray([integral.I2(C2Mat[k,l])* T0[k,l] for k, l in product(range(K),range(K))])
-    J2m = sum([integral.J2(C2Vec[k]) for k in range(K)]) # 0 for even hermite series activation functions
+    J2m = sum([integral.J2(C2Vec[k]) for k in range(K)])
     
     error  = 0.5*np.trace(omega)/D
     
@@ -126,20 +120,11 @@ def reconstruction_loss(model: AutoEncoder, dataloader, device: torch.device) ->
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=Path)
-    parser.add_argument("--device", default="auto")
     parser.add_argument("--overwrite", action="store_false")
     args = parser.parse_args()
     artifacts_dir = Path("artifacts")
 
-    if args.device == "auto":
-        if torch.backends.mps.is_available():
-            device = torch.device("mps")
-        elif torch.cuda.is_available():
-            device = torch.device("cuda")
-        else:
-            device = torch.device("cpu")
-    else:
-        device = torch.device(args.device)
+    device = torch.device("cpu")
 
     run_config = parse_config(args.config)
 
@@ -177,21 +162,22 @@ def main() -> None:
         )
 
     run_hash = make_hash(run_config=run_config)
-    integral = integral_for_activation(run_config.activation_function, run_config.N)
+    integral = integral_for_activation(
+        run_config.activation_function,
+        run_config.N,
+    )
 
     for seed in SEEDS:
         out_dir = artifacts_dir / run_hash / "autoencoder" / f"seed_{seed}"
         model_path = out_dir / "model.pt"
         loss_path = out_dir / "loss.jsonl"
         ode_loss_path = out_dir / "ode_loss.jsonl"
-        ode_state_path = out_dir / "ode_state.npz"
         ode_meta_path = out_dir / "ode_meta.json"
         initial_model_path = out_dir / "initial_model.pt"
 
         out_dir_exists = out_dir.exists()
         ode_complete = (
-            ode_state_path.exists()
-            and ode_loss_path.exists()
+            ode_loss_path.exists()
             and ode_meta_path.exists()
             and initial_model_path.exists()
             and is_current_ode_metadata(ode_meta_path)
@@ -212,10 +198,14 @@ def main() -> None:
             continue
 
         out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "run_config.json").write_text(
+            json.dumps(asdict(run_config), indent=2, sort_keys=True, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
         partial_outputs = []
         if run_ode and not ode_complete:
             partial_outputs.extend(
-                [ode_loss_path, ode_state_path, ode_meta_path, initial_model_path]
+                [ode_loss_path, ode_meta_path, initial_model_path]
             )
         if run_sgd and not sgd_complete:
             partial_outputs.extend([loss_path, model_path])
@@ -242,7 +232,11 @@ def main() -> None:
                         "alpha": sample.alpha,
                         "generalization_error": sample.generalization_error,
                     }
-                    loss_file.write(json.dumps(row) + "\n")
+                    row.update({
+                        name: sample.order_parameters[name].tolist()
+                        for name in ORDER_PARAMETER_NAMES
+                    })
+                    loss_file.write(json.dumps(row, allow_nan=False) + "\n")
 
                 ode_result = solve_ode_from_model(
                     model=model,
@@ -255,18 +249,17 @@ def main() -> None:
                     on_sample=write_ode_sample,
                 )
 
-            np.savez_compressed(
-                ode_state_path,
-                q=ode_result.final_state.q,
-                r=ode_result.final_state.r,
-                t=ode_result.final_state.t,
-                T0=ode_result.final_state.T0,
-                eigenvalues=eigenvalues,
-                alpha=np.asarray(ode_result.final_alpha),
-            )
             ode_metadata = {
                 "method": "RK45",
                 "integration_coordinates": ODE_INTEGRATION_COORDINATES,
+                "order_parameter_logging_version": ODE_ORDER_PARAMETER_LOGGING_VERSION,
+                "order_parameter_names": list(ORDER_PARAMETER_NAMES),
+                "D": run_config.D,
+                "K": run_config.K,
+                "activation_function": run_config.activation_function,
+                "integral_version": INTEGRAL_VERSIONS.get(run_config.activation_function.lower(), 1),
+                "hermite_order": getattr(integral, "N", None),
+                "eigenvalues": eigenvalues.tolist(),
                 "requested_alpha_end": float(run_config.alpha),
                 "minimum_alpha_end": MIN_ODE_ALPHA,
                 "max_rk45_alpha_step": ode_result.max_step,
@@ -283,7 +276,7 @@ def main() -> None:
                 json.dumps(ode_metadata, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-            print(f"saved: {ode_state_path}")
+            print(f"saved: {ode_loss_path}")
 
         if not run_sgd or sgd_complete:
             continue
@@ -331,36 +324,46 @@ def main() -> None:
                 optimizer.step()
 
                 completed_steps = step + 1
+                alpha = completed_steps / run_config.D
+                ge = None
+                order_parameters = None
                 test_loss = None
-                model.eval()
-                
-                
-                with torch.no_grad():
-                    # also order parameters are used for a more robust result
-                    T1, Q1, R1, T0, Q0, R0 = compute_order_parameters_from_weights(
-                        model=model,
-                        omega=omega_test, # test set covariance is used for OP
-                    )
-                    ge, _ = test_error_with_order_parameters(
-                        T0,
-                        T1,
-                        Q1,
-                        R1,
-                        omega_test, # test set for correct generalization error
-                        integral,
-                    )
-                    
-                # computed every alpha value, not D * alpha times like generalization error
-                if testloader is not None and completed_steps % run_config.D == 0:
-                    test_loss = reconstruction_loss(model, testloader, device)
 
-                alpha += 1.0 / run_config.D
+                # Evaluate generalization only at completed whole-alpha intervals.
+                if completed_steps % run_config.D == 0:
+                    model.eval()
+                    with torch.no_grad():
+                        T1, Q1, R1, T0, Q0, R0 = compute_order_parameters_from_weights(
+                            model=model,
+                            omega=omega_test,
+                        )
+                        order_parameters = {
+                            "Q0": Q0, "Q1": Q1, "R0": R0,
+                            "R1": R1, "T0": T0, "T1": T1,
+                        }
+                        ge, _ = test_error_with_order_parameters(
+                            T0,
+                            T1,
+                            Q1,
+                            R1,
+                            omega_test,
+                            integral,
+                        )
+                    if testloader is not None:
+                        test_loss = reconstruction_loss(model, testloader, device)
+
                 row = {
                     "step": step,
                     "alpha": alpha,
                     "loss": float(train_loss.detach().cpu()),
-                    "generalization_error": float(ge),
                 }
+                if ge is not None:
+                    row["generalization_error"] = float(ge)
+                if order_parameters is not None:
+                    row.update({
+                        name: matrix.tolist()
+                        for name, matrix in order_parameters.items()
+                    })
                 if test_loss is not None:
                     row["test_loss"] = float(test_loss)
                 if model.encoder.bias is not None:

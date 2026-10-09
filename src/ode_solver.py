@@ -16,12 +16,13 @@ import numpy as np
 from scipy.integrate import RK45
 
 from src.autoencoder import AutoEncoder
-from src.integrals.integrals import Integral
+from src.integrals import Integral
 
 
 MIN_ODE_ALPHA = 1.0
 MAX_RK45_ALPHA_STEP = 1000.0
 FACTOR_NORM_FLOOR = 0
+ORDER_PARAMETER_NAMES = ("Q0", "Q1", "R0", "R1", "T0", "T1")
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class ODEState:
 class ODESample:
     alpha: float
     generalization_error: float
+    order_parameters: dict[str, np.ndarray]
 
 
 @dataclass(frozen=True)
@@ -265,14 +267,13 @@ def _generalization_error_from_order_parameters(
     return float(error)
 
 
-def generalization_error_from_factor_vector(
+def order_parameters_from_factor_vector(
     vector: np.ndarray,
     K: int,
     D: int,
     eigenvalues: np.ndarray,
-    integral: Integral,
-) -> float:
-    """Evaluate population error without reconstructing full densities."""
+) -> dict[str, np.ndarray]:
+    """Compute the same six aggregate matrices as the SGD weight diagnostics."""
 
     factors = _factor_matrix(vector, K, D)
     eigenvalues = np.asarray(eigenvalues, dtype=np.float64)
@@ -282,12 +283,29 @@ def generalization_error_from_factor_vector(
     decoder_factors = factors[:, K:]
     weighted_encoder = eigenvalues[:, None] * encoder_factors
     weighted_decoder = eigenvalues[:, None] * decoder_factors
-    Q1 = encoder_factors.T @ weighted_encoder / D
-    R1 = decoder_factors.T @ weighted_encoder / D
-    T1 = decoder_factors.T @ weighted_decoder / D
-    T0 = decoder_factors.T @ decoder_factors
+    return {
+        "Q0": encoder_factors.T @ encoder_factors / D,
+        "Q1": encoder_factors.T @ weighted_encoder / D,
+        "R0": decoder_factors.T @ encoder_factors / np.sqrt(D),
+        "R1": decoder_factors.T @ weighted_encoder / D,
+        "T0": decoder_factors.T @ decoder_factors,
+        "T1": decoder_factors.T @ weighted_decoder / D,
+    }
+
+
+def generalization_error_from_factor_vector(
+    vector: np.ndarray,
+    K: int,
+    D: int,
+    eigenvalues: np.ndarray,
+    integral: Integral,
+) -> float:
+    """Evaluate population error without reconstructing full densities."""
+
+    parameters = order_parameters_from_factor_vector(vector, K, D, eigenvalues)
     return _generalization_error_from_order_parameters(
-        T0, Q1, R1, T1, eigenvalues, integral, D
+        parameters["T0"], parameters["Q1"], parameters["R1"], parameters["T1"],
+        eigenvalues, integral, D,
     )
 
 
@@ -659,7 +677,9 @@ def solve_ode_from_model(
     integration step: RK45 chooses its own accepted steps from ``rtol`` and
     ``atol``, capped by ``max_step``. A non-negative
     ``alpha_end`` below one is promoted to one so every ODE call performs at
-    least one full alpha of evolution.
+    least one full alpha of evolution. Output starts at ``sample_step`` and
+    includes only positive multiples of it through the integration endpoint;
+    neither alpha zero nor an off-grid endpoint adds an output sample.
     """
 
     alpha_end = float(alpha_end)
@@ -688,18 +708,22 @@ def solve_ode_from_model(
 
     def emit(alpha: float, vector: np.ndarray) -> None:
         nonlocal emitted_samples
-        error = generalization_error_from_factor_vector(
-            vector, K, D, eigenvalues, integral
+        parameters = order_parameters_from_factor_vector(vector, K, D, eigenvalues)
+        error = _generalization_error_from_order_parameters(
+            parameters["T0"], parameters["Q1"], parameters["R1"], parameters["T1"],
+            eigenvalues, integral, D,
         )
         if not np.isfinite(error):
             raise FloatingPointError(
                 f"Generalization error became non-finite at alpha={alpha}"
             )
         if on_sample is not None:
-            on_sample(ODESample(alpha=float(alpha), generalization_error=error))
+            on_sample(ODESample(
+                alpha=float(alpha),
+                generalization_error=error,
+                order_parameters=parameters,
+            ))
         emitted_samples += 1
-
-    emit(0.0, initial_vector)
 
     def rhs(_alpha: float, vector: np.ndarray) -> np.ndarray:
         return factor_state_derivative(
@@ -723,7 +747,6 @@ def solve_ode_from_model(
     )
     accepted_steps = 0
     sample_index = 1
-    last_emitted_alpha = 0.0
     time_tolerance = 32.0 * np.finfo(np.float64).eps * max(1.0, alpha_end)
 
     while solver.status == "running":
@@ -743,11 +766,7 @@ def solve_ode_from_model(
                 break
             sample_alpha = min(sample_alpha, alpha_end)
             emit(sample_alpha, interpolator(sample_alpha))
-            last_emitted_alpha = sample_alpha
             sample_index += 1
-
-    if last_emitted_alpha != alpha_end:
-        emit(alpha_end, solver.y)
 
     return ODEResult(
         final_state=state_from_factor_vector(solver.y, K, D),

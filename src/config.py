@@ -8,8 +8,8 @@ from typing import get_origin, get_args, Union, Any
 
 @dataclass(frozen=False)
 class RunConfig:
-    dataset: str # "cifar-10_gaussian" | "cifar-10_real" | "fashion_mnist"
-    activation_function: str # "erf" | "relu" | "gelu" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+    dataset: str # "cifar-10_gaussian" | "cifar-10_real" | "fashion_mnist" | "spiked_wishart"
+    activation_function: str # "erf" | "relu" | "linear" | "gelu" | "silu"
     tied: bool
     bias: bool
     alpha: int
@@ -21,10 +21,12 @@ class RunConfig:
     init_unit_sphere: bool = False # if true, initialize hidden-unit weight vectors with row norm 1
     unit_sphere_scale: Optional[float] = 1.
     init_std: float = 0.01
-    N: Optional[int] = None # The degree of approximation when hermite is used
+    N: Optional[int] = None # GELU/SiLU Hermite truncation order; defaults to 30
     test_loss: bool = False
     ode_sol: bool = False
     sgd: Optional[bool] = None
+    wishart_samples: Optional[int] = None
+    spike_multipliers: Optional[list[float]] = None
 
 
 def resolve_run_modes(

@@ -8,3 +8,4 @@ D: 1024
 K: 3
 init_uniform: true
 ode_sol: true
+sgd: true

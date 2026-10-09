@@ -9,6 +9,9 @@ from src.config import resolve_run_modes
 
 
 ODE_INTEGRATION_COORDINATES = "rank_one_factor_v1"
+ODE_ORDER_PARAMETER_LOGGING_VERSION = 1
+# ERF I3 was corrected; GELU now uses a truncated Hermite expansion.
+INTEGRAL_VERSIONS = {"erf": 2, "gelu": 2}
 
 
 def is_current_ode_metadata(path: Path) -> bool:
@@ -20,6 +23,8 @@ def is_current_ode_metadata(path: Path) -> bool:
         isinstance(metadata, dict)
         and metadata.get("integration_coordinates")
         == ODE_INTEGRATION_COORDINATES
+        and metadata.get("order_parameter_logging_version")
+        == ODE_ORDER_PARAMETER_LOGGING_VERSION
     )
 
 
@@ -27,6 +32,9 @@ def _to_dict(value):
     payload = asdict(value) if is_dataclass(value) else value
     if isinstance(payload, dict):
         payload = dict(payload)
+        activation = payload.get("activation_function", "").lower()
+        if activation in INTEGRAL_VERSIONS:
+            payload["integral_version"] = INTEGRAL_VERSIONS[activation]
         
         if payload.get("init_unit_sphere") is False:
             payload.pop("init_unit_sphere")
@@ -39,6 +47,12 @@ def _to_dict(value):
 
         if payload.get("test_loss") is False:
             payload.pop("test_loss")
+
+        if payload.get("wishart_samples") is None:
+            payload.pop("wishart_samples", None)
+
+        if payload.get("spike_multipliers") is None:
+            payload.pop("spike_multipliers", None)
 
         # The solver selects which artifact is produced, not the identity of
         # the experiment. Online and ODE results therefore share one hash.
@@ -66,6 +80,7 @@ def make_hash(run_config=None, seed=None):
 
 
 def check_hash(run_config=None, seed=None, artifacts_dir=Path("artifacts")):
+    """Return completed artifact paths; ODE-only returns its trajectory and metadata."""
     run_hash = make_hash(run_config=run_config)
     base = artifacts_dir / run_hash / "autoencoder" / f"seed_{seed}"
     if isinstance(run_config, dict):
@@ -83,7 +98,6 @@ def check_hash(run_config=None, seed=None, artifacts_dir=Path("artifacts")):
 
     model_path = base / "model.pt"
     loss_path = base / "loss.jsonl"
-    ode_state_path = base / "ode_state.npz"
     ode_loss_path = base / "ode_loss.jsonl"
     required = []
     if run_sgd:
@@ -92,7 +106,7 @@ def check_hash(run_config=None, seed=None, artifacts_dir=Path("artifacts")):
     if run_ode:
         metadata = base / "ode_meta.json"
         required.extend(
-            [ode_state_path, ode_loss_path, metadata, base / "initial_model.pt"]
+            [ode_loss_path, metadata, base / "initial_model.pt"]
         )
     if not all(path.is_file() for path in required):
         return None
@@ -100,4 +114,4 @@ def check_hash(run_config=None, seed=None, artifacts_dir=Path("artifacts")):
         return None
     if run_sgd:
         return str(model_path), str(loss_path)
-    return str(ode_state_path), str(ode_loss_path)
+    return str(ode_loss_path), str(metadata)

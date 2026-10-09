@@ -8,3 +8,4 @@ D: 1024
 K: 3
 init_std: 0.5
 ode_sol: true
+sgd: true

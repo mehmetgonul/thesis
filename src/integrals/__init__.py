@@ -1,1 +1,2 @@
-from .analytical_integrals import analytical_integral_factory
+from .base import Integral
+from .common import integral_for_activation
