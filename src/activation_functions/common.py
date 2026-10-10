@@ -2,21 +2,21 @@ from src.activation_functions.erf import Erf
 from src.activation_functions.relu import ReLU
 from src.activation_functions.gelu import GeLU
 from src.activation_functions.linear import Linear
-from src.activation_functions.silu import Silu
+from src.activation_functions.swish import Swish
+from src.activation_functions.softplus import Softplus
+from src.activation_functions.tanh import Tanh
+from src.activation_functions.h2 import H2
+from src.activation_functions.h3 import H3
+from src.activation_functions.h3_h2 import H3H2
+from src.activation_functions.sine import Sine
 
 def activation_function_factory(activation_function: str, **kwargs):
-    
+    functions = {
+        "erf": Erf, "relu": ReLU, "linear": Linear, "gelu": GeLU,
+        "swish": Swish, "softplus": Softplus, "tanh": Tanh,
+        "h2": H2, "h3": H3, "h3+h2": H3H2, "sine": Sine,
+    }
     activation_function = activation_function.lower()
-    
-    if activation_function == "erf":
-        return Erf(**kwargs)
-    elif activation_function == "relu":
-        return ReLU(**kwargs)
-    elif activation_function == "linear":
-        return Linear(**kwargs)
-    elif activation_function == "gelu":
-        return GeLU(**kwargs)
-    elif activation_function == "silu":
-        return Silu(**kwargs)
-    else:
+    if activation_function not in functions:
         raise ValueError(f"Unknown activation function: {activation_function}")
+    return functions[activation_function](**kwargs)

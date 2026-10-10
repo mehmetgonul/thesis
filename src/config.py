@@ -9,7 +9,7 @@ from typing import get_origin, get_args, Union, Any
 @dataclass(frozen=False)
 class RunConfig:
     dataset: str # "cifar-10_gaussian" | "cifar-10_real" | "fashion_mnist" | "spiked_wishart"
-    activation_function: str # "erf" | "relu" | "linear" | "gelu" | "silu"
+    activation_function: str # erf, relu, linear, gelu, swish, softplus, tanh, h2, h3, sine, h3+h2
     tied: bool
     bias: bool
     alpha: int
@@ -21,7 +21,7 @@ class RunConfig:
     init_unit_sphere: bool = False # if true, initialize hidden-unit weight vectors with row norm 1
     unit_sphere_scale: Optional[float] = 1.
     init_std: float = 0.01
-    N: Optional[int] = None # GELU/SiLU Hermite truncation order; defaults to 30
+    N: Optional[int] = None # GELU/Swish/Softplus/tanh Hermite order; defaults to 30
     test_loss: bool = False
     ode_sol: bool = False
     sgd: Optional[bool] = None

@@ -62,12 +62,12 @@ def compute_order_parameters_from_weights(model: AutoEncoder, omega):
     return T1, Q1, R1, T0, Q0, R0
 
 
-def normalize_order_parameters(order_parameters):
-    """Return correlation-normalized copies as lists; zero norms become null."""
+def normalize_order_parameters(order_parameters, final_order_parameters):
+    """Scale matrices by final recorded norms; zero final norms become null."""
     normalized = {}
     for suffix in ("0", "1"):
-        q_std = np.sqrt(np.maximum(np.diag(order_parameters[f"Q{suffix}"]), 0))
-        t_std = np.sqrt(np.maximum(np.diag(order_parameters[f"T{suffix}"]), 0))
+        q_std = np.sqrt(np.maximum(np.diag(final_order_parameters[f"Q{suffix}"]), 0))
+        t_std = np.sqrt(np.maximum(np.diag(final_order_parameters[f"T{suffix}"]), 0))
         for name, left, right in (
             (f"Q{suffix}", q_std, q_std),
             (f"T{suffix}", t_std, t_std),
@@ -81,6 +81,33 @@ def normalize_order_parameters(order_parameters):
             )
             normalized[f"{name}_normalized"] = np.where(valid, values, None).tolist()
     return normalized
+
+
+def normalize_order_parameter_log(path: Path):
+    """Rescale a completed history using its last recorded parameter norms."""
+    final_line = None
+    with path.open("r", encoding="utf-8") as source:
+        for line in source:
+            if '"Q0"' in line:
+                final_line = line
+    if final_line is None:
+        return
+    final_order_parameters = json.loads(final_line)
+
+    temporary_path = path.with_suffix(".normalized.tmp")
+    try:
+        with path.open("r", encoding="utf-8") as source, temporary_path.open(
+            "w", encoding="utf-8"
+        ) as target:
+            for line in source:
+                if '"Q0"' in line:
+                    row = json.loads(line)
+                    row.update(normalize_order_parameters(row, final_order_parameters))
+                    line = json.dumps(row, allow_nan=False) + "\n"
+                target.write(line)
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def test_error_with_order_parameters(T0, T1, Q1, R1, omega, integral: Integral):
@@ -258,7 +285,6 @@ def main() -> None:
                         name: sample.order_parameters[name].tolist()
                         for name in ORDER_PARAMETER_NAMES
                     })
-                    row.update(normalize_order_parameters(sample.order_parameters))
                     loss_file.write(json.dumps(row, allow_nan=False) + "\n")
 
                 ode_result = solve_ode_from_model(
@@ -272,6 +298,7 @@ def main() -> None:
                     on_sample=write_ode_sample,
                 )
 
+            normalize_order_parameter_log(ode_loss_path)
             ode_metadata = {
                 "method": "RK45",
                 "integration_coordinates": ODE_INTEGRATION_COORDINATES,
@@ -387,7 +414,6 @@ def main() -> None:
                         name: matrix.tolist()
                         for name, matrix in order_parameters.items()
                     })
-                    row.update(normalize_order_parameters(order_parameters))
                 if test_loss is not None:
                     row["test_loss"] = float(test_loss)
                 if model.encoder.bias is not None:
@@ -401,6 +427,7 @@ def main() -> None:
                 # )
                 step += 1
         
+        normalize_order_parameter_log(loss_path)
         torch.save(model.state_dict(), model_path)
         print(f"saved: {model_path}")
 
