@@ -8,13 +8,13 @@ from typing import get_origin, get_args, Union, Any
 
 @dataclass(frozen=False)
 class RunConfig:
-    dataset: str # "cifar-10_gaussian" | "cifar-10_real" | "fashion_mnist" | "spiked_wishart"
+    dataset: str  # spiked_wishart
     activation_function: str # erf, relu, linear, gelu, swish, softplus, tanh, h2, h3, h4, sine, h3+h2
     tied: bool
     bias: bool
     alpha: int
     learning_rate: float
-    D: int # input size - determined by the data set choice
+    D: int  # input dimension
     K: int # hidden state dimension
     preprocess_data: bool = True
     init_std: float = 0.01

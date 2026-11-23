@@ -10,8 +10,6 @@ from src.config import resolve_run_modes
 
 ODE_INTEGRATION_COORDINATES = "rank_one_factor_v1"
 ODE_ORDER_PARAMETER_LOGGING_VERSION = 1
-# ERF I3 was corrected; GELU now uses a truncated Hermite expansion.
-INTEGRAL_VERSIONS = {"erf": 2, "gelu": 2}
 
 
 def is_current_ode_metadata(path: Path) -> bool:
@@ -32,9 +30,6 @@ def _to_dict(value):
     payload = asdict(value) if is_dataclass(value) else value
     if isinstance(payload, dict):
         payload = dict(payload)
-        activation = payload.get("activation_function", "").lower()
-        if activation in INTEGRAL_VERSIONS:
-            payload["integral_version"] = INTEGRAL_VERSIONS[activation]
 
         if payload.get("preprocess_data") is True:
             payload.pop("preprocess_data")

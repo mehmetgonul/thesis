@@ -69,9 +69,3 @@ class ActivationFunction(ABC):
     
     def scale(self, s: float):
         return type(self)(self.stretch * s)
-        
-    def hermite_expansion(self, N: int = 10):
-        
-        coefficients = self.calc_coefficients(N, normalized=True)
-        
-        return HermiteE(coefficients[:N])

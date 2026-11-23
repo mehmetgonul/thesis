@@ -14,7 +14,6 @@ from src.autoencoder import AutoEncoder
 from src.config import parse_config, resolve_run_modes
 from src.data_manager import DataManager
 from src.hash import (
-    INTEGRAL_VERSIONS,
     ODE_INTEGRATION_COORDINATES,
     ODE_ORDER_PARAMETER_LOGGING_VERSION,
     is_current_ode_metadata,
@@ -297,7 +296,6 @@ def main() -> None:
                 "D": run_config.D,
                 "K": run_config.K,
                 "activation_function": run_config.activation_function,
-                "integral_version": INTEGRAL_VERSIONS.get(run_config.activation_function.lower(), 1),
                 "hermite_order": getattr(integral, "N", None),
                 "eigenvalues": eigenvalues.tolist(),
                 "requested_alpha_end": float(run_config.alpha),
