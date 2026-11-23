@@ -284,7 +284,7 @@ def order_parameters_from_factor_vector(
     weighted_encoder = eigenvalues[:, None] * encoder_factors
     weighted_decoder = eigenvalues[:, None] * decoder_factors
     return {
-        "Q0": encoder_factors.T @ encoder_factors / D,
+        "Q0": encoder_factors.T @ encoder_factors / D, 
         "Q1": encoder_factors.T @ weighted_encoder / D,
         "R0": decoder_factors.T @ encoder_factors / np.sqrt(D),
         "R1": decoder_factors.T @ weighted_encoder / D,

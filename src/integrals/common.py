@@ -16,8 +16,8 @@ def integral_for_activation(activation_function: str, N: int | None = None) -> I
         return GeLUIntegral(N=30 if N is None else N)
     if name in {"swish", "softplus", "tanh"}:
         return HermiteIntegral(activation_function_factory(name), N=30 if N is None else N)
-    if name in {"h2", "h3", "h3+h2"}:
-        return HermiteIntegral(activation_function_factory(name), N=2 if name == "h2" else 3)
+    if name in {"h2", "h3", "h4", "h3+h2"}:
+        return HermiteIntegral(activation_function_factory(name), N={"h2": 2, "h3": 3, "h4": 4, "h3+h2": 3}[name])
     analytical = {"erf": ErfIntegral, "relu": ReLUIntegral,
                   "linear": LinearIntegral, "sine": SineIntegral}
     if name in analytical:

@@ -35,12 +35,6 @@ def _to_dict(value):
         activation = payload.get("activation_function", "").lower()
         if activation in INTEGRAL_VERSIONS:
             payload["integral_version"] = INTEGRAL_VERSIONS[activation]
-        
-        if payload.get("init_unit_sphere") is False:
-            payload.pop("init_unit_sphere")
-            
-        if payload.get("unit_sphere_scale") in (None, 1, 1.0):
-            payload.pop("unit_sphere_scale")
 
         if payload.get("preprocess_data") is True:
             payload.pop("preprocess_data")

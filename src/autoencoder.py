@@ -21,29 +21,15 @@ class AutoEncoder(nn.Module):
         
         self.scale_factor = 1 / math.sqrt(self.input_size)
 
-        print(f"tied: {self.tied}, bias: {self.bias}")
-
         self.encoder = nn.Linear(self.input_size, self.hidden_size, bias=self.bias)
         
-        if config.init_uniform:
-            nn.init.uniform_(self.encoder.weight, a=-self.scale_factor, b=self.scale_factor)
-        else:         
-            nn.init.normal_(self.encoder.weight, mean=0.0, std=config.init_std)
-        if config.init_unit_sphere:
-            with torch.no_grad():
-                self.encoder.weight.copy_(config.unit_sphere_scale * F.normalize(self.encoder.weight, p=2, dim=1))
+        nn.init.normal_(self.encoder.weight, mean=0.0, std=config.init_std)
             
         if (not self.tied):
             # there is not bias in the decoder
             self.decoder = nn.Linear(self.hidden_size, self.input_size, bias=False)
             
-            if config.init_uniform:
-                nn.init.uniform_(self.decoder.weight, a=-self.scale_factor, b=self.scale_factor)
-            else:
-                nn.init.normal_(self.decoder.weight, mean=0.0, std=config.init_std)
-            if config.init_unit_sphere:
-                with torch.no_grad():
-                    self.decoder.weight.copy_(config.unit_sphere_scale *  F.normalize(self.decoder.weight, p=2, dim=0))
+            nn.init.normal_(self.decoder.weight, mean=0.0, std=config.init_std)
         
     def encode(self, x):
         return self.g(self.encoder(x) * self.scale_factor)

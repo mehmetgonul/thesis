@@ -224,7 +224,6 @@ def main() -> None:
         ode_meta_path = out_dir / "ode_meta.json"
         initial_model_path = out_dir / "initial_model.pt"
 
-        out_dir_exists = out_dir.exists()
         ode_complete = (
             ode_loss_path.exists()
             and ode_meta_path.exists()
@@ -232,15 +231,6 @@ def main() -> None:
             and is_current_ode_metadata(ode_meta_path)
         )
         sgd_complete = model_path.exists() and loss_path.exists()
-        statuses = []
-        if run_ode:
-            statuses.append(f"ode_complete={ode_complete}")
-        if run_sgd:
-            statuses.append(f"sgd_complete={sgd_complete}")
-        print(
-            f"exists: out_dir={out_dir_exists} "
-            + " ".join(statuses)
-        )
 
         if (not run_ode or ode_complete) and (not run_sgd or sgd_complete):
             print(f"skip: {out_dir}")

@@ -6,6 +6,8 @@ __pycache__/
 # C extensions
 *.so
 artifacts+2
+configs_2
+plots_paper
 # Distribution / packaging
 .Python
 build/
