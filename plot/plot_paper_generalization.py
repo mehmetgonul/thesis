@@ -61,11 +61,10 @@ COLORS = {
     "erf": "#2878B5", "gelu": "#E47728", "h2": "#777777", "h3_h2": "#AA8D24",
     "relu": "#33925B", "softplus": "#CC6677", "swish": "#AA4499",
 }
-MARKERS = {"erf": "o", "gelu": "s", "h2": "^", "h3_h2": "v",
-           "relu": "D", "softplus": "p", "swish": "<"}
 PC_RANKS = list(range(1, 11))
 LINE_WIDTH = 0.9
-MARKER_SIZE = 2.7
+SWEEP_MARKER = "o"
+SWEEP_MARKER_SIZE = 2.7
 
 
 def load_config(activation, width):
@@ -123,7 +122,7 @@ def main():
                 print(f"{activation}, K={width}: evaluation at alpha={SWEEP_ALPHA[activation]} missing")
             errors.append(error)
         sweep_axis.plot(K_VALUES, errors, color=COLORS[activation], label=LABELS[activation],
-                        marker=MARKERS[activation], markersize=MARKER_SIZE,
+                        marker=SWEEP_MARKER, markersize=SWEEP_MARKER_SIZE,
                         markerfacecolor="white", markeredgewidth=0.65, linewidth=LINE_WIDTH)
 
     learning_handles = []
@@ -171,11 +170,11 @@ def main():
             axis.axhline(pc_error, color="0.40" if rank == SPIKE_COUNT else "0.74",
                          linestyle=":" if rank <= SPIKE_COUNT else "--",
                          linewidth=0.8 if rank == SPIKE_COUNT else 0.45, zorder=0,
-                         label=f"PCA-{rank}" if axis is sweep_axis and rank == SPIKE_COUNT else "_nolegend_")
+                         label="PCA" if axis is sweep_axis and rank == SPIKE_COUNT else "_nolegend_")
 
     learning_axis.set(xlabel=r"$\alpha\,|g'(0)|$", ylabel="Reconstruction error",
                       xlim=(0, X_MAX))
-    sweep_axis.set(xlabel=r"$K$", ylabel="Asymptotic\nreconstruction error",
+    sweep_axis.set(xlabel=r"Number of internal units ($K$)", ylabel="Asymptotic\nreconstruction error",
                    xticks=K_VALUES, xlim=(min(K_VALUES) - 0.3, max(K_VALUES) + 0.3))
     lower = 0.5 * eigenvalues[:-max(PC_RANKS)].sum() / len(eigenvalues) - Y_PADDING[0]
     upper = 0.5 * eigenvalues.mean() + Y_PADDING[1]
