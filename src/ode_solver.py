@@ -1,10 +1,5 @@
-"""Autonomous full-spectrum ODE dynamics for the shallow autoencoder.
-
-The equations are adapted from the full-rank analytical updates in
-https://github.com/mariaref/NonLinearShallowAE.  A PyTorch model is used only
-to construct the initial spectral factors; all subsequent evolution is
-independent of the model and of SGD.
-"""
+# The equations are adapted from the full-rank analytical updates in
+# https://github.com/mariaref/NonLinearShallowAE.
 
 from __future__ import annotations
 
