@@ -340,6 +340,8 @@ def main() -> None:
         train_iter = iter(trainloader)
         alpha = 0.0
         step = 0
+        loss_sum = 0.0
+        interval_steps = 0
 
         with loss_path.open("w", encoding="utf-8") as f:
             while alpha < run_config.alpha:
@@ -363,12 +365,11 @@ def main() -> None:
 
                 completed_steps = step + 1
                 alpha = completed_steps / run_config.D
-                ge = None
-                order_parameters = None
-                test_loss = None
+                last_loss = train_loss.item()
+                loss_sum += last_loss
+                interval_steps += 1
 
-                # Evaluate generalization only at completed whole-alpha intervals.
-                if completed_steps % run_config.D == 0:
+                if completed_steps % run_config.D == 0 or alpha >= run_config.alpha:
                     model.eval()
                     with torch.no_grad():
                         T1, Q1, R1, T0, Q0, R0 = compute_order_parameters_from_weights(
@@ -387,26 +388,24 @@ def main() -> None:
                             omega_test,
                             integral,
                         )
-                    if testloader is not None:
-                        test_loss = reconstruction_loss(model, testloader, device)
-
-                row = {
-                    "step": step,
-                    "alpha": alpha,
-                    "loss": float(train_loss.detach().cpu()),
-                }
-                if ge is not None:
-                    row["generalization_error"] = float(ge)
-                if order_parameters is not None:
+                    row = {
+                        "step": step,
+                        "alpha": alpha,
+                        "loss": last_loss,
+                        "mean_train_loss": loss_sum / interval_steps,
+                        "generalization_error": float(ge),
+                    }
                     row.update({
                         name: matrix.tolist()
                         for name, matrix in order_parameters.items()
                     })
-                if test_loss is not None:
-                    row["test_loss"] = float(test_loss)
-                if model.encoder.bias is not None:
-                    row["bias_values"] = model.encoder.bias.detach().cpu().tolist()
-                f.write(json.dumps(row) + "\n")
+                    if testloader is not None:
+                        row["test_loss"] = reconstruction_loss(model, testloader, device)
+                    if model.encoder.bias is not None:
+                        row["bias_values"] = model.encoder.bias.detach().cpu().tolist()
+                    f.write(json.dumps(row) + "\n")
+                    loss_sum = 0.0
+                    interval_steps = 0
 
                 # print(
                 #     f"seed={seed} "

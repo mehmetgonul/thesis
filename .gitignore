@@ -39,7 +39,7 @@ tests
 .codex
 notes.txt
 /configs/
-scripts
+
 
 # don't commit outputs and scripts
 artifacts
