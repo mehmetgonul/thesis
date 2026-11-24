@@ -1,0 +1,16 @@
+dataset: spiked_wishart
+D: 1000
+wishart_samples: 1444
+spike_multipliers:
+- 1.0
+- 1.5
+- 2.0
+activation_function: relu
+tied: false
+bias: false
+alpha: 20000
+learning_rate: 1.0
+K: 1
+init_std: 0.0003125
+ode_sol: true
+sgd: false

@@ -19,7 +19,7 @@ python -m src.train_autoencoder configs/erf/spiked_wishart_3_k=3.yaml
 bash scripts/run_erf.sh
 ```
 
-Choose the activation's script in `scripts/`. YAML options `sgd` and `ode_sol` select the run modes. Results are saved in `artifacts/`.
+Choose the activation's script in `scripts/`. YAML options `sgd` and `ode_sol` select the run modes. Running the experiment scripts automatically creates an `artifacts/` folder and saves the experiment outputs there.
 
 Generate figures from saved `artifacts/` data by running these commands from the repository root:
 

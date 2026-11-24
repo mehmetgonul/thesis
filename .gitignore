@@ -37,7 +37,6 @@ tests
 *.spec
 .codex
 notes.txt
-/configs/
 
 
 # don't commit outputs and scripts
